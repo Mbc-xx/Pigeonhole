@@ -134,8 +134,9 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   read it, ⌄ closes it. Replies show › even when
   the rest of their conversation is in other folders. Archive, delete, pin and drag act
   on the whole conversation.
-- Several accounts: the menu next to the connection light in the top bar
-  lists every account, each with a label, icon and color you choose and its unread Inbox emails, and adds new ones. The same address can be connected twice on different servers, for example when a domain signs in at Microsoft but keeps its mail elsewhere. Each account has its own board, signatures, senders,
+- An open email can be minimized to a bar at the bottom of the board, to read others meanwhile.
+- Several accounts: a row of badges in the top bar
+  shows every account with its unread Inbox emails and adds new ones; label, icon and color are chosen in Settings → Account. The same address can be connected twice on different servers, for example when a domain signs in at Microsoft but keeps its mail elsewhere. Each account has its own board, signatures, senders,
   rules and Waiting column; appearance and behavior are shared. Only the account
   in use is followed. iCloud, Gmail and Microsoft have their own choice on the
   login screen: see [Mail services](#mail-services).

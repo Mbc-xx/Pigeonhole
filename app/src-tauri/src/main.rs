@@ -106,8 +106,11 @@ impl AppState {
         self.generation.fetch_add(1, Ordering::SeqCst);
         let _replay = self.replaying.lock().await;
         let mut inner = self.inner.lock().await;
+        // Saying goodbye to the server must not hold up the next account.
         if let Some(mut s) = inner.session.take() {
-            tokio::time::timeout(Duration::from_secs(3), s.logout()).await.ok();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::timeout(Duration::from_secs(3), s.logout()).await.ok();
+            });
         }
         *inner = Inner::default();
         if let Ok(mut guard) = self.store.lock() {
@@ -376,7 +379,7 @@ async fn account_unread(id: String) -> Option<u32> {
     let password = if account.oauth { String::new() } else { secret::get_password(&id).ok()?? };
     let check = async {
         let mut session = imap::connect(&account, &password).await?;
-        let unread = imap::inbox_unread(&mut session).await;
+        let unread = imap::folder_unseen(&mut session, "INBOX").await;
         tokio::time::timeout(Duration::from_secs(3), session.logout()).await.ok();
         unread
     };
@@ -1270,6 +1273,12 @@ fn set_unread_badge(count: u32, window: tauri::WebviewWindow) -> CmdResult<()> {
         .map_err(|e| e.to_string())
 }
 
+/// The title of the window, which names the account in use.
+#[tauri::command]
+fn set_window_title(title: String, window: tauri::WebviewWindow) -> CmdResult<()> {
+    window.set_title(&title).map_err(|e| e.to_string())
+}
+
 /// Saves an attachment to the Downloads folder and shows it in the file manager.
 /// Returns the saved file path.
 #[tauri::command]
@@ -1333,6 +1342,19 @@ async fn discard_draft(message_id: String, state: State<'_, AppState>) -> CmdRes
 async fn list_folders(state: State<'_, AppState>) -> CmdResult<Vec<imap::FolderInfo>> {
     let mut inner = state.inner.lock().await;
     with_retry!(inner, |s, _caps| imap::folder_tree(s))
+}
+
+/// Unread emails of the given folders. The connection is let go after each one:
+/// counting can be slow, and a click must not wait for all of it.
+#[tauri::command]
+async fn folder_unseen(folders: Vec<String>, state: State<'_, AppState>) -> CmdResult<HashMap<String, u32>> {
+    let mut counts = HashMap::new();
+    for folder in folders {
+        let mut inner = state.inner.lock().await;
+        let count = with_retry!(inner, |s, _caps| imap::folder_unseen(s, &folder))?;
+        counts.insert(folder, count);
+    }
+    Ok(counts)
 }
 
 /// Moves the email to the trash (`kind` = "trash") or the archive ("archive").
@@ -1570,17 +1592,23 @@ fn open_in_browser(url: &str) -> CmdResult<()> {
     r.map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// WebKit does not let the frame of an email leave for mailto: at all, so the
+/// interface rewrites those links to this reserved address.
+const MAILTO_LINK_HOST: &str = "mailto.invalid";
+
 /// Links clicked inside an email (an isolated frame) never navigate the app:
-/// web links open in the default browser, mailto links in a new email.
+/// web links open in the default browser, mailto links in a new email. The frame
+/// runs no scripts, so WebKit calls no click listener there: this is the only
+/// way a link is noticed, and the `frame-src` of the app must let it get this far.
 fn external_links<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("external-links")
         .on_navigation(|webview, url| match url.scheme() {
-            "http" | "https" if !matches!(url.host_str(), Some("localhost" | "tauri.localhost")) => {
-                let _ = open_in_browser(url.as_str());
+            "http" | "https" if url.host_str() == Some(MAILTO_LINK_HOST) => {
+                let _ = webview.emit("open-link", url.query().unwrap_or_default());
                 false
             }
-            "mailto" => {
-                let _ = webview.emit("open-link", url.as_str());
+            "http" | "https" if url.host_str() != Some("tauri.localhost") => {
+                let _ = open_in_browser(url.as_str());
                 false
             }
             _ => true,
@@ -1688,6 +1716,7 @@ fn main() {
             cancel_sign_in,
             list_accounts,
             set_account_look,
+            set_window_title,
             account_unread,
             switch_account,
             forget_account,
@@ -1702,6 +1731,7 @@ fn main() {
             test_sender,
             send_mail,
             list_folders,
+            folder_unseen,
             file_card,
             new_message_id,
             save_draft,

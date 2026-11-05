@@ -546,11 +546,6 @@ pub async fn folder_tree(session: &mut Session) -> Result<Vec<FolderInfo>> {
         (r, root, p)
     };
     out.sort_by_key(key);
-    for f in out.iter_mut().filter(|f| f.selectable) {
-        if let Ok(mb) = session.status(&f.name, "(UNSEEN)").await {
-            f.unseen = mb.unseen;
-        }
-    }
     Ok(out)
 }
 
@@ -912,9 +907,10 @@ pub async fn sent_recipients(session: &mut Session, limit: u32) -> Result<std::c
     Ok(out)
 }
 
-/// Unread emails in the Inbox.
-pub async fn inbox_unread(session: &mut Session) -> Result<u32> {
-    let mb = session.status("INBOX", "(UNSEEN)").await.context("STATUS INBOX failed")?;
+/// Unread emails of a folder. On a big one this is slow, Gmail's All Mail above all:
+/// the folder list leaves it out so that it never stands in the way of the board.
+pub async fn folder_unseen(session: &mut Session, folder: &str) -> Result<u32> {
+    let mb = session.status(folder, "(UNSEEN)").await.with_context(|| format!("cannot read {folder}"))?;
     Ok(mb.unseen.unwrap_or(0))
 }
 
