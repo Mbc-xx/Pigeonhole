@@ -115,8 +115,8 @@ impl AppState {
         }
     }
 
-    fn open_store(&self, email: &str) {
-        let opened = Store::open(email).map_err(|e| eprintln!("local copy unavailable: {e:#}")).ok();
+    fn open_store(&self, key: &str) {
+        let opened = Store::open(key).map_err(|e| eprintln!("local copy unavailable: {e:#}")).ok();
         if let Ok(mut guard) = self.store.lock() {
             *guard = opened;
         }
@@ -190,6 +190,7 @@ macro_rules! with_retry {
 #[derive(Serialize)]
 struct Status {
     configured: bool,
+    id: Option<String>,
     email: Option<String>,
     server: Option<String>,
     provider: Provider,
@@ -205,15 +206,15 @@ async fn get_status(state: State<'_, AppState>) -> CmdResult<Status> {
     let configured = match &acc {
         Some(a) => {
             let password = if a.oauth {
-                secret::get_refresh_token(&a.email).map_err(err)?.map(|_| String::new())
+                secret::get_refresh_token(a.key()).map_err(err)?.map(|_| String::new())
             } else {
-                secret::get_password(&a.email).map_err(err)?
+                secret::get_password(a.key()).map_err(err)?
             };
             let saved = password.is_some();
             if saved {
                 inner.account = Some(a.clone());
                 inner.password = password;
-                state.open_store(&a.email);
+                state.open_store(a.key());
             }
             saved
         }
@@ -221,6 +222,7 @@ async fn get_status(state: State<'_, AppState>) -> CmdResult<Status> {
     };
     Ok(Status {
         configured,
+        id: acc.as_ref().map(|a| a.key().to_string()),
         email: acc.as_ref().map(|a| a.email.clone()),
         server: acc.as_ref().map(|a| a.server.clone()),
         provider: acc.as_ref().map_or(Provider::Other, Account::provider),
@@ -228,16 +230,22 @@ async fn get_status(state: State<'_, AppState>) -> CmdResult<Status> {
     })
 }
 
-/// Can this address log in now? With `add` it must be new, otherwise it must be
-/// the account in use.
-fn check_login_allowed(email: &str, add: bool) -> CmdResult<()> {
-    let same = |a: &Account| a.email.eq_ignore_ascii_case(email);
-    if add && account::list().map_err(err)?.iter().any(same) {
-        return Err(format!("{email} is already connected"));
+/// Can this mailbox log in now? With `add` it must be new, otherwise it must be the
+/// account in use. Also tells the account which key it goes by.
+fn prepare_login(account: &mut Account, add: bool) -> CmdResult<()> {
+    if add {
+        let others = account::list().map_err(err)?;
+        if others.iter().any(|a| a.same_mailbox(account)) {
+            return Err(format!("{} on {} is already connected", account.email, account.server));
+        }
+        account.set_id_beside(&others);
+        return Ok(());
     }
-    if !add && account::is_extra() && !Account::load().map_err(err)?.is_some_and(|a| same(&a)) {
+    let saved = Account::load().map_err(err)?.filter(|a| a.email.eq_ignore_ascii_case(&account.email));
+    if account::is_extra() && saved.is_none() {
         return Err("To use another address, add it as a new account".into());
     }
+    account.id = saved.and_then(|a| a.id);
     Ok(())
 }
 
@@ -247,7 +255,7 @@ async fn finish_login(
     mut session: Session,
     password: String,
     add: bool,
-    save_secret: impl FnOnce() -> anyhow::Result<()>,
+    save_secret: impl FnOnce(&str) -> anyhow::Result<()>,
     state: &AppState,
 ) -> CmdResult<()> {
     let mut account = account;
@@ -259,12 +267,12 @@ async fn finish_login(
     if add {
         let shared = Settings::load().map_err(err)?;
         state.stop_account().await;
-        account::begin_new(&account.email).map_err(err)?;
+        account::begin_new(account.key()).map_err(err)?;
         Settings::default().with_shared_from(&shared).save().map_err(err)?;
     }
     account.save().map_err(err)?;
-    save_secret().map_err(err)?;
-    state.open_store(&account.email);
+    save_secret(account.key()).map_err(err)?;
+    state.open_store(account.key());
     let mut inner = state.inner.lock().await;
     *inner = Inner { account: Some(account), password: Some(password), session: Some(session), caps, ..Default::default() };
     Ok(())
@@ -276,7 +284,7 @@ async fn finish_login(
 async fn login(server: String, email: String, username: Option<String>, password: String, add: bool, state: State<'_, AppState>) -> CmdResult<()> {
     let mut account = Account::new(server.trim().to_string(), email.trim().to_string());
     account.username = username.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
-    check_login_allowed(&account.email, add)?;
+    prepare_login(&mut account, add)?;
     // Google shows app passwords in groups, and people copy the spaces too.
     let password = match account.provider() {
         Provider::Gmail => password.split_whitespace().collect(),
@@ -291,9 +299,8 @@ async fn login(server: String, email: String, username: Option<String>, password
         }
         Err(e) => return Err(err(e)),
     };
-    let email = account.email.clone();
     let keep = password.clone();
-    finish_login(account, session, password, add, move || secret::set_password(&email, &keep), &state).await
+    finish_login(account, session, password, add, move |key| secret::set_password(key, &keep), &state).await
 }
 
 /// The services this build can sign in to with the browser.
@@ -302,10 +309,10 @@ fn oauth_providers() -> Vec<Provider> {
     oauth::available()
 }
 
-/// Signs in with the system browser and returns the address.
+/// Signs in with the system browser.
 /// `email` may be empty: the service then says who it is.
 #[tauri::command]
-async fn oauth_sign_in(provider: Provider, email: String, add: bool, state: State<'_, AppState>) -> CmdResult<String> {
+async fn oauth_sign_in(provider: Provider, email: String, add: bool, state: State<'_, AppState>) -> CmdResult<()> {
     let typed = email.trim().to_string();
     let signed = tokio::select! {
         r = oauth::sign_in(provider, &typed, open_in_browser) => r.map_err(err)?,
@@ -320,16 +327,16 @@ async fn oauth_sign_in(provider: Provider, email: String, add: bool, state: Stat
         return Err(format!("You signed in as {}, not {typed}", signed.email));
     }
     let email = if typed.is_empty() { signed.email.clone() } else { typed };
-    check_login_allowed(&email, add)?;
     let (imap_server, smtp_server, _) = provider.servers().ok_or("this service has no browser sign-in")?;
     let mut account = Account::new(imap_server.to_string(), email.clone());
     account.oauth = true;
     account.username = Some(signed.email.clone()).filter(|u| !u.is_empty() && !u.eq_ignore_ascii_case(&email));
     account.smtp_server = Some(if signed.personal { MICROSOFT_PERSONAL_SMTP } else { smtp_server }.to_string());
+    prepare_login(&mut account, add)?;
+    oauth::assign(&email, account.key()).await;
     let session = imap::connect(&account, "").await.map_err(err)?;
     let refresh = signed.refresh_token;
-    finish_login(account, session, String::new(), add, || secret::set_refresh_token(&email, &refresh), &state).await?;
-    Ok(email)
+    finish_login(account, session, String::new(), add, |key| secret::set_refresh_token(key, &refresh), &state).await
 }
 
 /// Gives up on the sign-in waiting for the browser.
@@ -340,7 +347,9 @@ fn cancel_sign_in(state: State<'_, AppState>) {
 
 #[derive(Serialize)]
 struct AccountEntry {
+    id: String,
     email: String,
+    server: String,
     #[serde(flatten)]
     look: account::Look,
 }
@@ -349,7 +358,12 @@ struct AccountEntry {
 #[tauri::command]
 fn list_accounts() -> CmdResult<Vec<AccountEntry>> {
     let mut looks = account::looks().map_err(err)?;
-    let entry = |a: Account| AccountEntry { look: looks.remove(&a.email.to_lowercase()).unwrap_or_default(), email: a.email };
+    let entry = |a: Account| AccountEntry {
+        look: looks.remove(&a.key().to_lowercase()).unwrap_or_default(),
+        id: a.key().to_string(),
+        email: a.email,
+        server: a.server,
+    };
     Ok(account::list().map_err(err)?.into_iter().map(entry).collect())
 }
 
@@ -357,9 +371,9 @@ fn list_accounts() -> CmdResult<Vec<AccountEntry>> {
 /// None when they cannot be read: it is only a number in a menu, so a failure
 /// (offline, sign-in expired) is never reported as a problem of the account in use.
 #[tauri::command]
-async fn account_unread(email: String) -> Option<u32> {
-    let account = account::list().ok()?.into_iter().find(|a| a.email == email)?;
-    let password = if account.oauth { String::new() } else { secret::get_password(&email).ok()?? };
+async fn account_unread(id: String) -> Option<u32> {
+    let account = account::list().ok()?.into_iter().find(|a| a.key() == id)?;
+    let password = if account.oauth { String::new() } else { secret::get_password(&id).ok()?? };
     let check = async {
         let mut session = imap::connect(&account, &password).await?;
         let unread = imap::inbox_unread(&mut session).await;
@@ -371,21 +385,21 @@ async fn account_unread(email: String) -> Option<u32> {
 
 /// Chooses the icon of an account.
 #[tauri::command]
-fn set_account_look(email: String, look: account::Look) -> CmdResult<()> {
-    account::set_look(&email, look).map_err(err)
+fn set_account_look(id: String, look: account::Look) -> CmdResult<()> {
+    account::set_look(&id, look).map_err(err)
 }
 
 /// Moves to another account. The interface then starts again from `get_status`.
 #[tauri::command]
-async fn switch_account(email: String, state: State<'_, AppState>) -> CmdResult<()> {
+async fn switch_account(id: String, state: State<'_, AppState>) -> CmdResult<()> {
     state.stop_account().await;
-    account::switch_to(&email).map_err(err)
+    account::switch_to(&id).map_err(err)
 }
 
-/// Does an account, or an extra sender of one, still sign in with this address?
-fn password_in_use(email: &str) -> bool {
-    let same = |other: &str| other.eq_ignore_ascii_case(email);
-    account::list().unwrap_or_default().iter().any(|a| same(&a.email))
+/// Does an account, or an extra sender of one, still use this keychain entry?
+fn password_in_use(key: &str) -> bool {
+    let same = |other: &str| other.eq_ignore_ascii_case(key);
+    account::list().unwrap_or_default().iter().any(|a| same(a.key()))
         || account::all_dirs().unwrap_or_default().iter().any(|dir| {
             Settings::load_from(dir).is_ok_and(|s| s.senders.iter().any(|x| same(&x.email)))
         })
@@ -397,18 +411,18 @@ async fn forget_account(state: State<'_, AppState>) -> CmdResult<()> {
     state.stop_account().await;
     let Some(acc) = Account::load().map_err(err)? else { return Ok(()) };
     // An added account goes completely, its extra senders too.
-    let mut addresses = vec![acc.email.clone()];
+    let mut addresses = vec![acc.key().to_string()];
     if account::is_extra() {
         addresses.extend(Settings::load().map_err(err)?.senders.into_iter().map(|s| s.email));
     }
     account::remove_active().map_err(err)?;
-    kanbanmail_core::store::delete_for(&acc.email).ok();
+    kanbanmail_core::store::delete_for(acc.key()).ok();
     for address in addresses.iter().filter(|a| !password_in_use(a)) {
         secret::delete_password(address).map_err(err)?;
     }
-    secret::delete_refresh_token(&acc.email).map_err(err)?;
-    oauth::forget(&acc.email).await;
-    account::set_look(&acc.email, account::Look::default()).ok();
+    secret::delete_refresh_token(acc.key()).map_err(err)?;
+    oauth::forget(acc.key()).await;
+    account::set_look(acc.key(), account::Look::default()).ok();
     Ok(())
 }
 
@@ -760,12 +774,12 @@ fn cache_stats(state: State<'_, AppState>) -> kanbanmail_core::store::StoreStats
 /// Deletes the local copy (it is rebuilt as folders are opened again).
 #[tauri::command]
 async fn clear_cache(state: State<'_, AppState>) -> CmdResult<()> {
-    let email = state.inner.lock().await.account.as_ref().map(|a| a.email.clone()).ok_or("no account configured")?;
+    let key = state.inner.lock().await.account.as_ref().map(|a| a.key().to_string()).ok_or("no account configured")?;
     if let Ok(mut guard) = state.store.lock() {
         *guard = None;
     }
-    let result = kanbanmail_core::store::delete_for(&email).map_err(err);
-    state.open_store(&email);
+    let result = kanbanmail_core::store::delete_for(&key).map_err(err);
+    state.open_store(&key);
     result
 }
 

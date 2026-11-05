@@ -61,7 +61,7 @@ async fn connect_now(account: &Account, password: &str) -> Result<Session> {
         Ok(session) => Ok(session),
         Err((e, _)) => {
             // Perhaps revoked: the next attempt must not use it again.
-            crate::oauth::forget(&account.email).await;
+            crate::oauth::forget(account.key()).await;
             Err(anyhow!("login rejected: {e}.{help}"))
         }
     }

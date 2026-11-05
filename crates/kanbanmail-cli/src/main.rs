@@ -35,7 +35,7 @@ fn ask(label: &str, default: Option<&str>) -> Result<String> {
 async fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("reset") {
         if let Some(acc) = Account::load()? {
-            secret::delete_password(&acc.email)?;
+            secret::delete_password(acc.key())?;
         }
         let path = kanbanmail_core::account::config_dir()?.join("account.toml");
         let _ = std::fs::remove_file(path);
@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
 
     let saved = Account::load()?;
     let (account, password, is_new) = match &saved {
-        Some(acc) => match secret::get_password(&acc.email)? {
+        Some(acc) => match secret::get_password(acc.key())? {
             Some(p) => {
                 println!("Using saved account: {} on {}", acc.email, acc.server);
                 (acc.clone(), p, false)
@@ -68,7 +68,7 @@ async fn main() -> Result<()> {
 
     if is_new {
         account.save()?;
-        secret::set_password(&account.email, &password)?;
+        secret::set_password(account.key(), &password)?;
         println!("Details saved (password in the keychain).\n");
     }
 

@@ -54,6 +54,21 @@ fn accounts_keep_their_own_settings_and_can_be_removed() {
     assert_eq!(account::config_dir().unwrap(), root);
     assert_eq!(Settings::load().unwrap().signature, "First");
 
+    // The same address on another server is an account of its own.
+    let mut twin = Account::new("mail.twin.example".into(), "first@example.com".into());
+    twin.set_id_beside(&account::list().unwrap());
+    account::begin_new(twin.key()).unwrap();
+    twin.save().unwrap();
+    Settings { signature: "Twin".into(), ..Settings::default() }.save().unwrap();
+    assert_eq!(emails(), ["first@example.com", "first@example.com"]);
+    account::switch_to("first@example.com").unwrap();
+    assert_eq!(Settings::load().unwrap().signature, "First");
+    account::switch_to(twin.key()).unwrap();
+    assert_eq!(Account::load().unwrap().unwrap().server, "mail.twin.example");
+    account::remove_active().unwrap();
+    assert_eq!(emails(), ["first@example.com"]);
+    assert_eq!(Account::load().unwrap().unwrap().server, "mail.first.example");
+
     // Removing the first while another exists hands over to that one.
     account::begin_new("third@example.com").unwrap();
     Account::new("mail.third.example".into(), "third@example.com".into()).save().unwrap();

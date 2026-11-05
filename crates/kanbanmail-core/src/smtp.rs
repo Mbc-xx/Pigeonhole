@@ -454,7 +454,7 @@ pub async fn send(account: &Account, password: &str, message: &Message) -> Resul
         .await
         .with_context(|| format!("sending via {host}:{} failed", account.smtp_port));
     if sent.is_err() && account.oauth {
-        crate::oauth::forget(&account.email).await;
+        crate::oauth::forget(account.key()).await;
     }
     sent.map(|_| ()).map_err(|e| explain(account, e))
 }

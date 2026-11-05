@@ -124,6 +124,7 @@ impl Sender {
     pub fn account(&self) -> crate::account::Account {
         let name = self.display_name.trim();
         crate::account::Account {
+            id: None,
             server: self.smtp_server.clone(),
             port: 993,
             email: self.email.clone(),

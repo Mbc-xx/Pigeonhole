@@ -33,6 +33,10 @@ pub struct Account {
     /// Signed in with the browser: the keychain holds a refresh token, not a password.
     #[serde(default)]
     pub oauth: bool,
+    /// Set only when another account has the same address on another server:
+    /// see [`Account::key`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 /// The mail services with their own rules. Everything else is a plain IMAP server.
@@ -142,9 +146,9 @@ fn read_looks(root: &Path) -> BTreeMap<String, Look> {
     std::fs::read_to_string(root.join(LOOKS_FILE)).ok().and_then(|text| toml::from_str(&text).ok()).unwrap_or_default()
 }
 
-fn write_look(root: &Path, email: &str, look: Look) -> Result<()> {
+fn write_look(root: &Path, key: &str, look: Look) -> Result<()> {
     let mut looks = read_looks(root);
-    let key = email.to_lowercase();
+    let key = key.to_lowercase();
     if look == Look::default() {
         looks.remove(&key);
     } else {
@@ -154,23 +158,23 @@ fn write_look(root: &Path, email: &str, look: Look) -> Result<()> {
     std::fs::write(&path, toml::to_string_pretty(&looks)?).with_context(|| format!("writing {}", path.display()))
 }
 
-/// The chosen icons, by lowercase address.
+/// The chosen icons, by lowercase [`Account::key`].
 pub fn looks() -> Result<BTreeMap<String, Look>> {
     Ok(read_looks(&root_dir()?))
 }
 
 /// Sets the icon and label of an account; an empty [`Look`] goes back to the defaults.
-pub fn set_look(email: &str, look: Look) -> Result<()> {
-    write_look(&root_dir()?, email, look)
+pub fn set_look(key: &str, look: Look) -> Result<()> {
+    write_look(&root_dir()?, key, look)
 }
 
-/// An email address as a file name.
-pub(crate) fn safe_name(email: &str) -> String {
-    email.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '@' || c == '-' { c } else { '_' }).collect()
+/// An account key as a file name.
+pub(crate) fn safe_name(key: &str) -> String {
+    key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '@' || c == '-' { c } else { '_' }).collect()
 }
 
-fn extra_dir(root: &Path, email: &str) -> PathBuf {
-    root.join("accounts").join(safe_name(email))
+fn extra_dir(root: &Path, key: &str) -> PathBuf {
+    root.join("accounts").join(safe_name(key))
 }
 
 fn read_account(dir: &Path) -> Result<Option<Account>> {
@@ -194,15 +198,15 @@ fn dirs_in(root: &Path) -> Vec<PathBuf> {
 /// The extra account to use at startup (None: the one in the main folder).
 fn saved_active(root: &Path) -> Option<String> {
     let named = std::fs::read_to_string(root.join(ACTIVE_FILE)).ok().map(|s| s.trim().to_string());
-    if let Some(email) = named.filter(|e| !e.is_empty() && extra_dir(root, e).join("account.toml").exists()) {
-        return Some(email);
+    if let Some(key) = named.filter(|k| !k.is_empty() && extra_dir(root, k).join("account.toml").exists()) {
+        return Some(key);
     }
     // The first account was disconnected while others remain.
     let first = dirs_in(root).into_iter().next()?;
     if first == root {
         return None;
     }
-    read_account(&first).ok().flatten().map(|a| a.email)
+    read_account(&first).ok().flatten().map(|a| a.key().to_string())
 }
 
 fn active() -> &'static RwLock<Option<String>> {
@@ -210,15 +214,15 @@ fn active() -> &'static RwLock<Option<String>> {
     ACTIVE.get_or_init(|| RwLock::new(root_dir().ok().and_then(|root| saved_active(&root))))
 }
 
-fn set_active(root: &Path, email: Option<String>) -> Result<()> {
+fn set_active(root: &Path, key: Option<String>) -> Result<()> {
     let path = root.join(ACTIVE_FILE);
-    match &email {
-        Some(e) => std::fs::write(&path, e).with_context(|| format!("writing {}", path.display()))?,
+    match &key {
+        Some(k) => std::fs::write(&path, k).with_context(|| format!("writing {}", path.display()))?,
         None => {
             std::fs::remove_file(&path).ok();
         }
     }
-    *active().write().unwrap() = email;
+    *active().write().unwrap() = key;
     Ok(())
 }
 
@@ -226,7 +230,7 @@ fn set_active(root: &Path, email: Option<String>) -> Result<()> {
 pub fn config_dir() -> Result<PathBuf> {
     let root = root_dir()?;
     Ok(match active().read().unwrap().as_deref() {
-        Some(email) => extra_dir(&root, email),
+        Some(key) => extra_dir(&root, key),
         None => root,
     })
 }
@@ -250,23 +254,23 @@ pub fn is_extra() -> bool {
     active().read().unwrap().is_some()
 }
 
-/// Makes `email` the account in use.
-pub fn switch_to(email: &str) -> Result<()> {
+/// Makes the account with this [`Account::key`] the one in use.
+pub fn switch_to(key: &str) -> Result<()> {
     let root = root_dir()?;
-    let first = read_account(&root)?.is_some_and(|a| a.email.eq_ignore_ascii_case(email));
+    let first = read_account(&root)?.is_some_and(|a| a.key().eq_ignore_ascii_case(key));
     if !first {
-        anyhow::ensure!(extra_dir(&root, email).join("account.toml").exists(), "unknown account: {email}");
+        anyhow::ensure!(extra_dir(&root, key).join("account.toml").exists(), "unknown account: {key}");
     }
-    set_active(&root, (!first).then(|| email.to_string()))
+    set_active(&root, (!first).then(|| key.to_string()))
 }
 
 /// Creates the folder of a new account and makes it the one in use:
 /// [`Account::save`] then writes there.
-pub fn begin_new(email: &str) -> Result<()> {
-    anyhow::ensure!(email.contains('@'), "invalid email address: {email}");
+pub fn begin_new(key: &str) -> Result<()> {
+    anyhow::ensure!(key.contains('@'), "invalid email address: {key}");
     let root = root_dir()?;
-    std::fs::create_dir_all(extra_dir(&root, email))?;
-    set_active(&root, Some(email.to_string()))
+    std::fs::create_dir_all(extra_dir(&root, key))?;
+    set_active(&root, Some(key.to_string()))
 }
 
 /// Deletes the configuration of the account in use and moves to the next one, if any.
@@ -274,7 +278,7 @@ pub fn begin_new(email: &str) -> Result<()> {
 pub fn remove_active() -> Result<()> {
     let root = root_dir()?;
     match active().read().unwrap().as_deref() {
-        Some(email) => std::fs::remove_dir_all(extra_dir(&root, email))?,
+        Some(key) => std::fs::remove_dir_all(extra_dir(&root, key))?,
         None => std::fs::remove_file(root.join("account.toml"))?,
     }
     set_active(&root, None)?;
@@ -298,7 +302,27 @@ impl Account {
             smtp_port: known.map_or(465, |(_, _, port)| port),
             username: None,
             oauth: false,
+            id: None,
         }
+    }
+
+    /// What tells this account from the others: its folder, keychain entry, local
+    /// copy and icon go by it. It is the address, unless another account already
+    /// had the same address when this one was added.
+    pub fn key(&self) -> &str {
+        self.id.as_deref().unwrap_or(&self.email)
+    }
+
+    /// Is this the same mailbox as `other`? The same address on another server is not:
+    /// a domain can sign in at Microsoft and keep its mail somewhere else.
+    pub fn same_mailbox(&self, other: &Account) -> bool {
+        self.email.eq_ignore_ascii_case(&other.email) && self.server.eq_ignore_ascii_case(&other.server)
+    }
+
+    /// Prepares a new account to live next to `others`.
+    pub fn set_id_beside(&mut self, others: &[Account]) {
+        let taken = others.iter().any(|a| a.key().eq_ignore_ascii_case(&self.email));
+        self.id = taken.then(|| format!("{}#{}", self.email, self.server).to_lowercase());
     }
 
     pub fn provider(&self) -> Provider {
@@ -340,6 +364,20 @@ mod tests {
     fn write_account(dir: &Path, email: &str) {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("account.toml"), format!("server = \"mail.example.com\"\nemail = \"{email}\"\n")).unwrap();
+    }
+
+    #[test]
+    fn the_same_address_on_another_server_is_another_account() {
+        let microsoft = Account::new("outlook.office365.com".into(), "me@example.com".into());
+        let mut own = Account::new("mail.example.com".into(), "Me@Example.com".into());
+        assert_eq!(microsoft.key(), "me@example.com");
+        assert!(!microsoft.same_mailbox(&own));
+        assert!(microsoft.same_mailbox(&Account::new("OUTLOOK.office365.com".into(), "ME@example.com".into())));
+        own.set_id_beside(std::slice::from_ref(&microsoft));
+        assert_eq!(own.key(), "me@example.com#mail.example.com");
+        assert_ne!(safe_name(own.key()), safe_name(microsoft.key()));
+        own.set_id_beside(&[]);
+        assert_eq!(own.key(), "Me@Example.com");
     }
 
     #[test]

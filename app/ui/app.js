@@ -399,7 +399,7 @@ async function start() {
   try {
     const status = await invoke("get_status");
     if (status.configured) {
-      setAccount(status.email);
+      setAccount(status);
       const fromCache = showCachedBoard();
       await openBoard({ fromCache });
     } else {
@@ -421,12 +421,13 @@ function accountBadge(a, account) {
 }
 
 /// The account in use, shown in the top bar.
-async function setAccount(email) {
+async function setAccount({ id, email }) {
+  state.accountId = id;
   state.email = email;
   paintAccountButton({ email });
   const accounts = await invoke("list_accounts").catch(() => []);
-  const account = accounts.find((a) => a.email === email);
-  if (account && state.email === email) paintAccountButton(account);
+  const account = accounts.find((a) => a.id === id);
+  if (account && state.accountId === id) paintAccountButton(account);
 }
 
 function paintAccountButton(account) {
@@ -442,10 +443,10 @@ function canLeaveAccount() {
   return false;
 }
 
-async function switchAccount(email) {
+async function switchAccount(id) {
   if (!canLeaveAccount()) return;
   show("loading");
-  await invoke("switch_account", { email }).catch((e) => console.error(e));
+  await invoke("switch_account", { id }).catch((e) => console.error(e));
   location.reload();
 }
 
@@ -471,18 +472,20 @@ function popAccountMenu(fill) {
 }
 
 /// One line of the account menu: the account, and a button to change how it appears.
-function accountRow(account) {
-  const here = account.email === state.email;
+function accountRow(account, _, accounts) {
+  const here = account.id === state.accountId;
+  const twin = accounts.filter((a) => a.email === account.email).length > 1;
   const row = el("div", "account-row");
   const open = menuButton("check", account.label || account.email, () => {
     closeConvMenu();
-    if (!here) switchAccount(account.email);
+    if (!here) switchAccount(account.id);
   });
   const check = open.firstChild;
   check.replaceWith(accountBadge(el("span", "avatar"), account));
   open.lastChild.className = "account-address";
-  if (account.label) open.lastChild.append(el("small", "", account.email));
-  const unread = el("span", "account-unread", state.accountUnread[account.email] || "");
+  const detail = [account.label && account.email, twin && account.server].filter(Boolean).join(" · ");
+  if (detail) open.lastChild.append(el("small", "", detail));
+  const unread = el("span", "account-unread", state.accountUnread[account.id] || "");
   open.append(unread);
   if (here) open.append(check);
   const edit = menuButton("compose", "", () => editAccountLook(account));
@@ -490,7 +493,7 @@ function accountRow(account) {
   edit.title = "Change label and icon";
   edit.setAttribute("aria-label", `Change the label and icon of ${account.email}`);
   row.append(open, edit);
-  updateAccountUnread(account.email, unread);
+  updateAccountUnread(account.id, unread);
   return row;
 }
 
@@ -498,22 +501,22 @@ const UNREAD_CHECK_MS = 60_000;
 
 /// Fills in the unread Inbox emails of an account. The one in use is already known;
 /// another needs a short connection, so it is asked at most once a minute.
-async function updateAccountUnread(email, label) {
+async function updateAccountUnread(id, label) {
   const show = (count) => {
-    state.accountUnread[email] = count;
+    state.accountUnread[id] = count;
     label.textContent = count || "";
     label.title = count ? `${count} unread in the Inbox` : "";
   };
-  if (email === state.email) return show(state.folders.find((f) => f.kind === "inbox")?.unseen || 0);
-  if (Date.now() - (state.unreadChecked[email] || 0) < UNREAD_CHECK_MS) return;
-  state.unreadChecked[email] = Date.now();
-  const count = await invoke("account_unread", { email }).catch(() => null);
-  if (count === null) delete state.unreadChecked[email];
+  if (id === state.accountId) return show(state.folders.find((f) => f.kind === "inbox")?.unseen || 0);
+  if (Date.now() - (state.unreadChecked[id] || 0) < UNREAD_CHECK_MS) return;
+  state.unreadChecked[id] = Date.now();
+  const count = await invoke("account_unread", { id }).catch(() => null);
+  if (count === null) delete state.unreadChecked[id];
   else show(count);
 }
 
 async function openAccountMenu() {
-  const accounts = await invoke("list_accounts").catch(() => [{ email: state.email }]);
+  const accounts = await invoke("list_accounts").catch(() => [{ id: state.accountId, email: state.email }]);
   popAccountMenu((menu) => {
     menu.append(
       ...accounts.map(accountRow),
@@ -557,8 +560,8 @@ function editAccountLook(account) {
     const change = (part) => {
       Object.assign(look, part);
       paint();
-      invoke("set_account_look", { email: account.email, look }).catch((e) => toast(String(e)));
-      if (account.email === state.email) paintAccountButton({ ...account, ...look });
+      invoke("set_account_look", { id: account.id, look }).catch((e) => toast(String(e)));
+      if (account.id === state.accountId) paintAccountButton({ ...account, ...look });
     };
 
     choice(icons, "icon", null, (b) => {
@@ -697,14 +700,14 @@ async function browserSignIn() {
   const label = btn.textContent;
   btn.textContent = "Waiting for the browser… Cancel";
   try {
-    const email = await invoke("oauth_sign_in", {
+    await invoke("oauth_sign_in", {
       provider: state.loginProvider,
       email: $("login-email").value,
       add: !!state.addingAccount,
     });
     if (state.addingAccount) return location.reload();
     askedToSignIn = false;
-    setAccount(email);
+    setAccount(await invoke("get_status"));
     await openBoard();
   } catch (e) {
     if (String(e) !== "cancelled") showLoginError(String(e));
@@ -734,7 +737,7 @@ $("login-form").addEventListener("submit", async (ev) => {
     if (state.addingAccount) return location.reload();
     $("login-password").value = "";
     askedToSignIn = false;
-    setAccount($("login-email").value.trim());
+    setAccount(await invoke("get_status"));
     await openBoard();
   } catch (e) {
     showLoginError(String(e));
@@ -791,7 +794,7 @@ $("logout").addEventListener("click", async () => {
 
 // ---------- local cache for an instant start ----------
 
-const cacheKey = (k) => `cache:${state.email}:${k}`;
+const cacheKey = (k) => `cache:${state.accountId}:${k}`;
 
 function cacheGet(k) {
   try {
@@ -809,7 +812,7 @@ function cacheSet(k, value) {
 
 function cacheClear() {
   try {
-    for (const k of Object.keys(localStorage)) if (k.startsWith(`cache:${state.email}:`)) localStorage.removeItem(k);
+    for (const k of Object.keys(localStorage)) if (k.startsWith(`cache:${state.accountId}:`)) localStorage.removeItem(k);
   } catch (_) {}
 }
 
@@ -1399,7 +1402,7 @@ function waitingContext(cards) {
   }
   // When each email entered the column (first seen there); emails already
   // there the first time count from their own date.
-  const key = "waiting:" + state.email;
+  const key = "waiting:" + state.accountId;
   let since = null;
   try {
     since = JSON.parse(local.get(key) || "null");

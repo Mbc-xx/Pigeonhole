@@ -108,15 +108,15 @@ fn body_key(folder: &str, uidvalidity: Option<u32>, card: &Card) -> String {
     }
 }
 
-/// The folder of the cache for an email address (one database per account).
-pub fn path_for(email: &str) -> Result<PathBuf> {
+/// The file of the cache of an account (one database each), by its key.
+pub fn path_for(key: &str) -> Result<PathBuf> {
     let dirs = directories::ProjectDirs::from("", "", crate::account::APP_NAME).context("cannot determine the cache folder")?;
-    Ok(dirs.cache_dir().join(format!("{}.sqlite", crate::account::safe_name(email))))
+    Ok(dirs.cache_dir().join(format!("{}.sqlite", crate::account::safe_name(key))))
 }
 
 /// Deletes the local copy of an account (when it is disconnected or the cache is cleared).
-pub fn delete_for(email: &str) -> Result<()> {
-    let path = path_for(email)?;
+pub fn delete_for(key: &str) -> Result<()> {
+    let path = path_for(key)?;
     for suffix in ["", "-wal", "-shm"] {
         let p = PathBuf::from(format!("{}{suffix}", path.display()));
         if p.exists() {
@@ -128,8 +128,8 @@ pub fn delete_for(email: &str) -> Result<()> {
 
 impl Store {
     /// Opens (or creates) the local copy of an account.
-    pub fn open(email: &str) -> Result<Store> {
-        let path = path_for(email)?;
+    pub fn open(key: &str) -> Result<Store> {
+        let path = path_for(key)?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
         }

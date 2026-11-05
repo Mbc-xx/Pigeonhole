@@ -280,7 +280,7 @@ struct Token {
     expires: Instant,
 }
 
-/// Access tokens by address. Held during a renewal, so that two connections
+/// Access tokens by account key. Held during a renewal, so that two connections
 /// starting together do not both spend a refresh token that may work only once.
 fn tokens() -> &'static Mutex<HashMap<String, Token>> {
     static TOKENS: OnceLock<Mutex<HashMap<String, Token>>> = OnceLock::new();
@@ -300,8 +300,16 @@ async fn remember(email: &str, value: String, expires_in: Option<u64>) {
 }
 
 /// Drops the access token, after a server refused it.
-pub async fn forget(email: &str) {
-    tokens().lock().await.remove(&key(email));
+pub async fn forget(account_key: &str) {
+    tokens().lock().await.remove(&key(account_key));
+}
+
+/// Moves the token of a sign-in from the address to the account it is for.
+pub async fn assign(email: &str, account_key: &str) {
+    let mut all = tokens().lock().await;
+    if let Some(token) = all.remove(&key(email)) {
+        all.insert(key(account_key), token);
+    }
 }
 
 /// Was the refresh token refused for good (revoked, expired, password changed)?
@@ -312,12 +320,12 @@ fn must_sign_in_again(error: &str) -> bool {
 /// A valid access token for the account, renewed if needed.
 pub async fn access_token(account: &Account) -> Result<String> {
     let mut all = tokens().lock().await;
-    if let Some(token) = all.get(&key(&account.email)).filter(|t| t.expires > Instant::now()) {
+    if let Some(token) = all.get(&key(account.key())).filter(|t| t.expires > Instant::now()) {
         return Ok(token.value.clone());
     }
     let expired = || anyhow!("Your sign-in to {} has expired. {SIGN_IN_AGAIN}.", account.email);
     let client = client(account.provider()).context("this build has no sign-in for this service")?;
-    let refresh = secret::get_refresh_token(&account.email)?.ok_or_else(expired)?;
+    let refresh = secret::get_refresh_token(account.key())?.ok_or_else(expired)?;
     let reply = token_request(&client, &[("grant_type", "refresh_token"), ("refresh_token", &refresh)]).await?;
     if let Some(error) = &reply.error {
         if must_sign_in_again(error) {
@@ -328,9 +336,9 @@ pub async fn access_token(account: &Account) -> Result<String> {
     let value = reply.access_token.context("no access token from the sign-in service")?;
     // Microsoft replaces the refresh token, Google keeps the old one.
     if let Some(new) = reply.refresh_token.filter(|r| *r != refresh) {
-        secret::set_refresh_token(&account.email, &new)?;
+        secret::set_refresh_token(account.key(), &new)?;
     }
-    all.insert(key(&account.email), Token { value: value.clone(), expires: valid_until(reply.expires_in) });
+    all.insert(key(account.key()), Token { value: value.clone(), expires: valid_until(reply.expires_in) });
     Ok(value)
 }
 
