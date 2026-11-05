@@ -87,7 +87,7 @@
   <section id="board-screen" class="screen" hidden>
     <header class="topbar">
       <button id="toggle-sidebar" class="icon-btn" title="Expand/collapse the sidebar (Ctrl/⌘+B)"><svg class="icon"><use href="#i-sidebar"/></svg></button>
-      <button id="account-btn" class="account-btn" title="Switch account" aria-haspopup="menu"><span id="account-avatar" class="avatar"></span><span id="account-name" class="label"></span><svg class="icon account-chevron"><use href="#i-chevron"/></svg></button>
+      <nav id="account-rail" class="account-rail" aria-label="Accounts"></nav>
       <div id="sync" class="sync" data-level="busy"><span class="sync-light"></span><span id="sync-status" class="muted"></span></div>
       <div class="spacer"></div>
       <div class="search-box">
@@ -252,6 +252,7 @@
       <div id="compose-preview-pane" class="compose-preview" hidden></div>
       <div id="compose-drop" class="compose-drop" hidden><div><svg class="icon"><use href="#i-paperclip"/></svg><span>Drop files to attach them</span></div></div>
       <footer class="compose-foot">
+        <span id="compose-account" class="compose-account" hidden></span>
         <span class="muted" id="compose-from"></span>
         <select id="compose-sender" class="compose-sender" title="The mailbox this email is sent from" aria-label="From" hidden></select>
         <span class="muted small" id="compose-status"></span>
@@ -284,6 +285,9 @@
       <div class="tab-panels">
         <section class="tab-panel" data-panel="account" role="tabpanel">
           <p class="muted" id="settings-email"></p>
+          <h3 class="settings-sub">Accounts</h3>
+          <p class="muted small">Label, icon and color are saved at once. A right click on a badge in the top bar opens them too.</p>
+          <div id="account-looks" class="account-looks"></div>
           <label>Sender name (optional)
             <input id="set-name" type="text" placeholder="Jane Doe">
           </label>

@@ -7,7 +7,7 @@ const $ = (id) => document.getElementById(id);
 // Calls that read the server turn the connection light yellow while they run.
 // Part of the error of a browser sign-in that stopped working (see oauth.rs).
 const SIGN_IN_AGAIN = "Sign in again";
-const SERVER_READS = new Set(["open_board", "load_column", "list_folders", "load_all_mail", "search_emails", "flush_queue"]);
+const SERVER_READS = new Set(["open_board", "load_column", "list_folders", "folder_unseen", "load_all_mail", "search_emails", "flush_queue"]);
 let serverBusy = 0;
 function invoke(cmd, args) {
   const call = tauriInvoke(cmd, args).catch((e) => {
@@ -35,8 +35,9 @@ const state = {
   signatureHtml: "",
   senders: [], // extra mailboxes used only to send from
   displayName: "", // sender name of the main account
-  accountUnread: {}, // address -> unread Inbox emails, as last seen
-  unreadChecked: {}, // address -> when it was last asked
+  accounts: [], // in the order chosen by the user
+  accountUnread: {}, // account -> unread Inbox emails, as last seen
+  unreadChecked: {}, // account -> when it was last asked
   defaultBcc: "", // addresses added in Bcc of every new email and reply
   loadRemoteImages: false, // load remote images in every email without asking
   onlyUnread: false,
@@ -145,17 +146,20 @@ function clearSelection() {
 async function markMany(members, seen) {
   const byFolder = new Map();
   for (const m of members) {
+    if (m.card.seen !== seen) changeUnseen(m.folder, seen ? -1 : 1);
     m.card.seen = seen;
     if (!byFolder.has(m.folder)) byFolder.set(m.folder, []);
     byFolder.get(m.folder).push(m.card.uid);
   }
   for (const c of visibleColumns()) renderCards(c.folder);
+  paintFolderCounts();
   try {
     for (const [folder, uids] of byFolder) await invoke("set_seen_many", { folder, uids, seen });
+    scheduleFolderCounts();
   } catch (e) {
     toast("Read state not changed: " + e);
+    await afterBulkChange();
   }
-  await afterBulkChange();
 }
 
 function markAllRead(folder) {
@@ -400,6 +404,7 @@ async function start() {
     const status = await invoke("get_status");
     if (status.configured) {
       setAccount(status);
+      flashAccountAfterSwitch();
       const fromCache = showCachedBoard();
       await openBoard({ fromCache });
     } else {
@@ -420,20 +425,51 @@ function accountBadge(a, account) {
   return a;
 }
 
-/// The account in use, shown in the top bar.
-async function setAccount({ id, email }) {
-  state.accountId = id;
-  state.email = email;
-  paintAccountButton({ email });
-  const accounts = await invoke("list_accounts").catch(() => []);
-  const account = accounts.find((a) => a.id === id);
-  if (account && state.accountId === id) paintAccountButton(account);
+const readLocal = (key, fallback) => {
+  try {
+    return JSON.parse(local.get(key)) || fallback;
+  } catch (_) {
+    return fallback;
+  }
+};
+
+const currentAccount = () => state.accounts.find((a) => a.id === state.accountId) || { id: state.accountId, email: state.email };
+const severalAccounts = () => state.accounts.length > 1;
+
+function sortAccounts(accounts) {
+  const order = readLocal("accountOrder", []);
+  const rank = (a) => (order.includes(a.id) ? order.indexOf(a.id) : order.length);
+  return [...accounts].sort((a, b) => rank(a) - rank(b));
 }
 
-function paintAccountButton(account) {
-  accountBadge($("account-avatar"), account);
-  $("account-name").textContent = account.label || account.email;
-  $("account-btn").title = `${account.email}: switch account`;
+/// Reads the accounts again; until then the list remembered from last time is shown.
+async function loadAccounts() {
+  const accounts = await invoke("list_accounts").catch(() => null);
+  if (!accounts) return;
+  state.accounts = sortAccounts(accounts);
+  local.set("accounts", JSON.stringify(state.accounts));
+  paintAccount();
+}
+
+/// The account in use, shown in the top bar.
+function setAccount({ id, email }) {
+  state.accountId = id;
+  state.email = email;
+  state.accounts = readLocal("accounts", []);
+  ({ unread: state.accountUnread = {}, checked: state.unreadChecked = {} } = readLocal("accountCounts", {}));
+  paintAccount();
+  loadAccounts();
+}
+
+/// Everything that shows which account is in use.
+function paintAccount() {
+  const account = currentAccount();
+  renderAccountRail();
+  const root = document.documentElement.style;
+  if (severalAccounts()) root.setProperty("--account-color", account.color || avatarColor(account.email));
+  else root.removeProperty("--account-color");
+  const title = severalAccounts() ? `Pigeonhole — ${account.label || account.email}` : "Pigeonhole";
+  invoke("set_window_title", { title }).catch(() => {});
 }
 
 /// Moving to another account starts the interface again, so nothing may be in progress.
@@ -445,9 +481,21 @@ function canLeaveAccount() {
 
 async function switchAccount(id) {
   if (!canLeaveAccount()) return;
-  show("loading");
+  for (const b of $("account-rail").children) b.classList.toggle("here", b.dataset.id === id);
+  local.set("accountSwitched", "1");
   await invoke("switch_account", { id }).catch((e) => console.error(e));
   location.reload();
+}
+
+/// After a switch the new account shows itself for a moment.
+function flashAccountAfterSwitch() {
+  if (!local.get("accountSwitched")) return;
+  local.set("accountSwitched", "");
+  const account = currentAccount();
+  const flash = el("div", "account-flash");
+  flash.append(accountBadge(el("span", "avatar"), account), el("span", "", account.label || account.email));
+  flash.addEventListener("animationend", () => flash.remove());
+  document.body.append(flash);
 }
 
 /// The login screen, this time for one more mailbox.
@@ -465,142 +513,192 @@ $("login-cancel").addEventListener("click", () => {
   show("board-screen");
 });
 
-/// A menu under the account button.
-function popAccountMenu(fill) {
-  const r = $("account-btn").getBoundingClientRect();
-  return popMenuAt(r.left, r.bottom + 6, fill);
+const shownAccounts = () => (state.accounts.length ? state.accounts : [currentAccount()]);
+
+/// The accounts as a row in the top bar: a click moves to one, a right
+/// click changes how it appears, and dragging puts them in another order.
+function renderAccountRail() {
+  const rail = $("account-rail");
+  if (state.railDragging) return;
+  const add = el("button", "rail-add");
+  add.append(icon("plus"));
+  add.title = "Add account";
+  add.setAttribute("aria-label", "Add account");
+  add.addEventListener("click", startAddingAccount);
+  rail.replaceChildren(...shownAccounts().map(railAccount), add);
 }
 
-/// One line of the account menu: the account, and a button to change how it appears.
-function accountRow(account, _, accounts) {
-  const here = account.id === state.accountId;
-  const twin = accounts.filter((a) => a.email === account.email).length > 1;
-  const row = el("div", "account-row");
-  const open = menuButton("check", account.label || account.email, () => {
-    closeConvMenu();
-    if (!here) switchAccount(account.id);
+const isTwin = (account) => state.accounts.filter((a) => a.email === account.email).length > 1;
+
+function railAccount(account) {
+  const name = account.label || account.email;
+  const b = el("button", "rail-account");
+  b.classList.toggle("here", account.id === state.accountId);
+  b.dataset.id = account.id;
+  b.title = [account.label, account.email, isTwin(account) && account.server].filter(Boolean).join(" · ");
+  b.setAttribute("aria-label", name);
+  b.draggable = true;
+  b.append(accountBadge(el("span", "avatar"), account));
+  const count = state.accountUnread[account.id];
+  if (count) b.append(el("span", "rail-count", count > 99 ? "99+" : String(count)));
+  b.addEventListener("click", () => {
+    if (account.id !== state.accountId) switchAccount(account.id);
   });
-  const check = open.firstChild;
-  check.replaceWith(accountBadge(el("span", "avatar"), account));
-  open.lastChild.className = "account-address";
-  const detail = [account.label && account.email, twin && account.server].filter(Boolean).join(" · ");
-  if (detail) open.lastChild.append(el("small", "", detail));
-  const unread = el("span", "account-unread", state.accountUnread[account.id] || "");
-  open.append(unread);
-  if (here) open.append(check);
-  const edit = menuButton("compose", "", () => editAccountLook(account));
-  edit.classList.add("account-edit");
-  edit.title = "Change label and icon";
-  edit.setAttribute("aria-label", `Change the label and icon of ${account.email}`);
-  row.append(open, edit);
-  updateAccountUnread(account.id, unread);
-  return row;
+  b.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    openSettings(account.id);
+  });
+  b.addEventListener("dragstart", (ev) => {
+    state.railDragging = account.id;
+    ev.dataTransfer.effectAllowed = "move";
+    ev.dataTransfer.setData("text/plain", name);
+  });
+  b.addEventListener("dragover", (ev) => {
+    if (!state.railDragging) return;
+    ev.preventDefault();
+    b.classList.add("drop-before");
+  });
+  b.addEventListener("dragleave", () => b.classList.remove("drop-before"));
+  b.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    moveAccountBefore(state.railDragging, account.id);
+  });
+  b.addEventListener("dragend", () => {
+    state.railDragging = null;
+    renderAccountRail();
+  });
+  return b;
+}
+
+function moveAccountBefore(id, before) {
+  const moved = state.accounts.find((a) => a.id === id);
+  if (!moved || id === before) return;
+  const others = state.accounts.filter((a) => a !== moved);
+  others.splice(others.findIndex((a) => a.id === before), 0, moved);
+  state.accounts = others;
+  local.set("accountOrder", JSON.stringify(others.map((a) => a.id)));
+  local.set("accounts", JSON.stringify(others));
+}
+
+function startAddingAccount() {
+  closeConvMenu();
+  if (!canLeaveAccount()) return;
+  setAddingAccount(true);
+  show("login");
 }
 
 const UNREAD_CHECK_MS = 60_000;
+const OTHER_ACCOUNTS_CHECK_MS = 120_000;
 
-/// Fills in the unread Inbox emails of an account. The one in use is already known;
-/// another needs a short connection, so it is asked at most once a minute.
-async function updateAccountUnread(id, label) {
-  const show = (count) => {
-    state.accountUnread[id] = count;
-    label.textContent = count || "";
-    label.title = count ? `${count} unread in the Inbox` : "";
-  };
-  if (id === state.accountId) return show(state.folders.find((f) => f.kind === "inbox")?.unseen || 0);
+function setAccountUnread(id, count) {
+  state.accountUnread[id] = count;
+  local.set("accountCounts", JSON.stringify({ unread: state.accountUnread, checked: state.unreadChecked }));
+  renderAccountRail();
+}
+
+/// The unread Inbox emails of another account, which take a short connection.
+async function askAccountUnread(id) {
   if (Date.now() - (state.unreadChecked[id] || 0) < UNREAD_CHECK_MS) return;
   state.unreadChecked[id] = Date.now();
   const count = await invoke("account_unread", { id }).catch(() => null);
   if (count === null) delete state.unreadChecked[id];
-  else show(count);
+  else setAccountUnread(id, count);
 }
 
-async function openAccountMenu() {
-  const accounts = await invoke("list_accounts").catch(() => [{ id: state.accountId, email: state.email }]);
-  popAccountMenu((menu) => {
-    menu.append(
-      ...accounts.map(accountRow),
-      el("div", "menu-sep"),
-      menuButton("plus", "Add account…", () => {
-        closeConvMenu();
-        if (!canLeaveAccount()) return;
-        setAddingAccount(true);
-        show("login");
-      }),
-    );
-  });
+/// Only while the window is in view: nobody reads the numbers otherwise.
+function checkOtherAccounts() {
+  if (document.hidden || state.offline) return;
+  for (const a of state.accounts) if (a.id !== state.accountId) askAccountUnread(a.id);
 }
+
+setInterval(checkOtherAccounts, OTHER_ACCOUNTS_CHECK_MS);
+document.addEventListener("visibilitychange", checkOtherAccounts);
 
 const ACCOUNT_ICONS = ["🏠", "💼", "🏢", "🎓", "🛒", "🧾", "✈️", "❤️", "⭐", "🔒", "🌍", "📰", "⚽", "🎵", "🐾"];
 
-/// Chooses the label, icon and color of an account; every change is saved at once.
-function editAccountLook(account) {
-  const look = { icon: account.icon || null, color: account.color || null, label: account.label || null };
-  popAccountMenu((menu) => {
-    const preview = el("span", "avatar");
-    const typed = el("input");
-    const label = el("input");
-    const icons = el("div", "look-grid");
-    const colors = el("div", "look-grid");
-    const choice = (parent, key, value, content) => {
-      const b = el("button");
-      b.type = "button";
-      b.dataset.value = value ?? "";
-      content(b);
-      b.addEventListener("click", () => change({ [key]: value }));
-      parent.append(b);
-    };
-    const paint = () => {
-      accountBadge(preview, { ...account, ...look });
-      for (const [grid, value] of [[icons, look.icon], [colors, look.color]]) {
-        for (const b of grid.children) b.classList.toggle("selected", b.dataset.value === (value ?? ""));
-      }
-      if (document.activeElement !== typed) typed.value = ACCOUNT_ICONS.includes(look.icon) ? "" : look.icon || "";
-    };
-    const change = (part) => {
-      Object.assign(look, part);
+/// The accounts in the settings, each opening on its label, icon and color.
+function renderAccountLooks(openId) {
+  $("account-looks").replaceChildren(
+    ...shownAccounts().map((account) => {
+      const row = el("details", "look-account");
+      row.name = "account-look";
+      row.open = account.id === openId;
+      const badge = el("span", "avatar");
+      const name = el("span", "look-name");
+      const summary = el("summary");
+      summary.append(badge, name);
+      const paint = () => {
+        accountBadge(badge, account);
+        name.textContent = account.label || account.email;
+        const detail = [account.label && account.email, isTwin(account) && account.server].filter(Boolean).join(" · ");
+        if (detail) name.append(el("small", "", detail));
+      };
       paint();
-      invoke("set_account_look", { id: account.id, look }).catch((e) => toast(String(e)));
-      if (account.id === state.accountId) paintAccountButton({ ...account, ...look });
-    };
-
-    choice(icons, "icon", null, (b) => {
-      b.textContent = (account.email[0] || "?").toUpperCase();
-      b.title = "The initial";
-    });
-    for (const emoji of ACCOUNT_ICONS) choice(icons, "icon", emoji, (b) => (b.textContent = emoji));
-    choice(colors, "color", null, (b) => {
-      b.append(icon("refresh"));
-      b.title = "Automatic color";
-    });
-    for (const color of AVATAR_COLORS) choice(colors, "color", color, (b) => (b.style.background = color));
-
-    typed.placeholder = "Or type an emoji or two letters";
-    typed.setAttribute("aria-label", "Your own icon");
-    typed.addEventListener("input", () => {
-      const parts = [...new Intl.Segmenter().segment(typed.value.trim())].slice(0, 2);
-      change({ icon: parts.map((p) => p.segment).join("") || null });
-    });
-
-    label.placeholder = "Label, such as Work";
-    label.maxLength = 30;
-    label.value = look.label || "";
-    label.setAttribute("aria-label", "Label of the account");
-    label.addEventListener("input", () => change({ label: label.value.trim() || null }));
-
-    const head = el("div", "look-head");
-    head.append(preview, el("span", "account-address", account.email));
-    menu.classList.add("look-menu");
-    menu.append(head, label, icons, colors, typed, el("div", "menu-sep"), menuButton("back", "Back to accounts", openAccountMenu));
-    paint();
-  });
+      row.append(summary, accountLookEditor(account, paint));
+      return row;
+    }),
+  );
 }
 
-$("account-btn").addEventListener("click", (ev) => {
-  ev.stopPropagation();
-  if (document.querySelector(".conv-menu")) closeConvMenu();
-  else openAccountMenu();
-});
+/// Chooses the label, icon and color of an account; every change is saved at once.
+function accountLookEditor(account, painted) {
+  const box = el("div", "look-editor");
+  const typed = el("input");
+  const label = el("input");
+  const icons = el("div", "look-grid");
+  const colors = el("div", "look-grid");
+  const choice = (parent, key, value, content) => {
+    const b = el("button");
+    b.type = "button";
+    b.dataset.value = value ?? "";
+    content(b);
+    b.addEventListener("click", () => change({ [key]: value }));
+    parent.append(b);
+  };
+  const paint = () => {
+    for (const [grid, value] of [[icons, account.icon], [colors, account.color]]) {
+      for (const b of grid.children) b.classList.toggle("selected", b.dataset.value === (value ?? ""));
+    }
+    if (document.activeElement !== typed) typed.value = ACCOUNT_ICONS.includes(account.icon) ? "" : account.icon || "";
+    painted();
+  };
+  const change = (part) => {
+    Object.assign(account, part);
+    paint();
+    const look = { icon: account.icon || null, color: account.color || null, label: account.label || null };
+    invoke("set_account_look", { id: account.id, look }).catch((e) => toast(String(e)));
+    local.set("accounts", JSON.stringify(state.accounts));
+    paintAccount();
+  };
+
+  choice(icons, "icon", null, (b) => {
+    b.textContent = (account.email[0] || "?").toUpperCase();
+    b.title = "The initial";
+  });
+  for (const emoji of ACCOUNT_ICONS) choice(icons, "icon", emoji, (b) => (b.textContent = emoji));
+  choice(colors, "color", null, (b) => {
+    b.append(icon("refresh"));
+    b.title = "Automatic color";
+  });
+  for (const color of AVATAR_COLORS) choice(colors, "color", color, (b) => (b.style.background = color));
+
+  typed.placeholder = "Or type an emoji or two letters";
+  typed.setAttribute("aria-label", "Your own icon");
+  typed.addEventListener("input", () => {
+    const parts = [...new Intl.Segmenter().segment(typed.value.trim())].slice(0, 2);
+    change({ icon: parts.map((p) => p.segment).join("") || null });
+  });
+
+  label.placeholder = "Label, such as Work";
+  label.maxLength = 30;
+  label.value = account.label || "";
+  label.setAttribute("aria-label", "Label of the account");
+  label.addEventListener("input", () => change({ label: label.value.trim() || null }));
+
+  box.append(label, icons, colors, typed);
+  paint();
+  return box;
+}
 
 function showLoginError(msg) {
   $("login-error").textContent = msg;
@@ -918,6 +1016,7 @@ async function openBoard({ fromCache = false, retry = false } = {}) {
     loadFolders();
     loadKnownSenders();
     await Promise.all(state.columns.map((c) => loadColumn(c.folder)));
+    checkOtherAccounts();
     // Rules and notifications also work when the Inbox is not a board column.
     if (!state.columns.some((c) => c.folder.toUpperCase() === "INBOX")) checkInbox();
   } catch (e) {
@@ -1911,6 +2010,9 @@ function countEmails(n, conversation = false) {
 /// then offers Undo. Returns [{ message_id, now, back }].
 async function moveEmails(members, { to = "", kind = "", quiet = false, conversation = false } = {}) {
   dropFromLists(members);
+  const target = to || state.folders.find((f) => f.kind === kind)?.name;
+  for (const m of members) if (!m.card.seen) moveUnseen(m.folder, target);
+  paintFolderCounts();
   const moves = [];
   let failed = 0;
   let error = "";
@@ -1973,6 +2075,10 @@ async function moveCard(from, uid, to) {
   const [card] = list.splice(idx, 1);
   const { __folder, ...moved } = card;
   state.cards[to] = [moved, ...(state.cards[to] || [])];
+  if (!card.seen) {
+    moveUnseen(from, to);
+    paintFolderCounts();
+  }
   renderCards(from);
   for (const key of MULTI_KEYS) renderCards(key);
   renderCards(to);
@@ -2085,7 +2191,18 @@ $("only-unread").addEventListener("click", (ev) => {
 
 /// The numbers on the filter buttons: unread emails, and the important ones among them,
 /// in the lists on screen.
+/// Asked for by every column drawn: counted once for all those drawn together.
+let filterCountsQueued = false;
 function updateFilterCounts() {
+  if (filterCountsQueued) return;
+  filterCountsQueued = true;
+  queueMicrotask(() => {
+    filterCountsQueued = false;
+    countFilters();
+  });
+}
+
+function countFilters() {
   if (state.view?.search) return;
   let unread = 0;
   let important = 0;
@@ -2112,15 +2229,43 @@ const FOLDER_ICONS = { inbox: "inbox", drafts: "drafts", sent: "sent", archive: 
 
 async function loadFolders() {
   try {
-    state.folders = await invoke("list_folders");
+    const known = new Map(state.folders.map((f) => [f.name, f.unseen]));
+    state.folders = (await invoke("list_folders")).map((f) => ({ ...f, unseen: known.get(f.name) }));
     refreshSentForWaiting();
-    cacheSet("folders", state.folders);
-    renderFolders();
-    updateBadge();
+    paintFolderCounts();
+    await refreshUnseen(state.folders.filter(countsUnseen).map((f) => f.name));
   } catch (e) {
     if (isOfflineError(e)) goOffline();
     else toast("Could not read folders: " + e);
   }
+}
+
+/// Counters change with the click; the server's numbers arrive later and correct them.
+function changeUnseen(folder, by) {
+  const f = state.folders.find((x) => x.name === folder);
+  if (f) f.unseen = Math.max(0, (f.unseen || 0) + by);
+  touchedFolders.add(folder);
+}
+
+/// All Mail and Gmail's views repeat other folders, and counting them takes long.
+const countsUnseen = (f) => f.selectable && f.kind !== "all" && f.kind !== "view";
+
+async function refreshUnseen(folders) {
+  const counts = await invoke("folder_unseen", { folders });
+  for (const f of state.folders) if (counts && f.name in counts) f.unseen = counts[f.name];
+  cacheSet("folders", state.folders);
+  paintFolderCounts();
+}
+
+function moveUnseen(from, to) {
+  changeUnseen(from, -1);
+  if (to) changeUnseen(to, 1);
+}
+
+function paintFolderCounts() {
+  renderFolders();
+  updateBadge();
+  setAccountUnread(state.accountId, state.folders.find((f) => f.kind === "inbox")?.unseen || 0);
 }
 
 /// The Dock badge: unread Inbox emails, or only the important ones when
@@ -2134,10 +2279,17 @@ function updateBadge() {
   invoke("set_unread_badge", { count }).catch(() => {});
 }
 
+/// After a change only the folders concerned are asked, not all of them.
 let countsTimer;
+const touchedFolders = new Set();
 function scheduleFolderCounts() {
   clearTimeout(countsTimer);
-  countsTimer = setTimeout(loadFolders, 3000);
+  countsTimer = setTimeout(() => {
+    const wanted = new Set([...touchedFolders, ...visibleColumns().map((c) => c.folder)]);
+    touchedFolders.clear();
+    const folders = state.folders.filter((f) => countsUnseen(f) && (f.kind === "inbox" || wanted.has(f.name)));
+    refreshUnseen(folders.map((f) => f.name)).catch((e) => console.error(e));
+  }, 3000);
 }
 
 // ---------- All Mail ----------
@@ -2594,6 +2746,7 @@ $("reader-load-images").addEventListener("click", () => {
 /// Changes read/unread on the server and updates the card right away.
 async function setSeen(folder, card, seen) {
   stopSeenTimer();
+  if (card.seen !== seen) changeUnseen(folder, seen ? -1 : 1);
   card.seen = seen;
   // The column may have been reloaded meanwhile: update the current copy too.
   const live = (state.cards[folder] || []).find((c) => c.uid === card.uid);
@@ -2605,6 +2758,7 @@ async function setSeen(folder, card, seen) {
       renderCards(key);
     }
   }
+  paintFolderCounts();
   scheduleFolderCounts();
   if (readerCard?.card === card) updateSeenButton();
   renderCards(folder);
@@ -2815,6 +2969,12 @@ async function loadThread(folder, card, msg) {
 
 const AVATAR_COLORS = ["#4f8fd6", "#43a07a", "#c4684f", "#8a6fd1", "#c98a2e", "#3e9bb0", "#b85c8f"];
 
+function avatarColor(name) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
 /// A round badge with the sender's initials ("Anna Bianchi" -> AB), in a color of its own for each name.
 function setAvatar(a, name) {
   const n = name.trim();
@@ -2822,9 +2982,7 @@ function setAvatar(a, name) {
   const initials = words.length > 1 ? words[0][0] + words[words.length - 1][0] : (words[0] || n)[0] || "?";
   a.textContent = initials.toUpperCase();
   a.setAttribute("aria-hidden", "true");
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  a.style.background = AVATAR_COLORS[h % AVATAR_COLORS.length];
+  a.style.background = avatarColor(name);
   return a;
 }
 
@@ -3047,7 +3205,7 @@ $("conv-move").addEventListener("click", async (ev) => {
   });
 });
 document.addEventListener("mousedown", (ev) => {
-  if (!ev.target.closest?.(".conv-menu, #conv-move, #reader-move, #account-btn, [data-sel='move']")) closeConvMenu();
+  if (!ev.target.closest?.(".conv-menu, #conv-move, #reader-move, [data-sel='move']")) closeConvMenu();
 });
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && document.querySelector(".conv-menu")) {
@@ -3848,6 +4006,10 @@ function signatureHtml(from) {
 
 /// "From": plain text with only the main account, a menu with extra senders.
 function renderComposeSender() {
+  const account = currentAccount();
+  const badge = $("compose-account");
+  badge.hidden = !severalAccounts();
+  badge.replaceChildren(accountBadge(el("span", "avatar"), account), el("span", "", account.label || ""));
   const select = $("compose-sender");
   select.hidden = !state.senders.length;
   $("compose-from").textContent = state.senders.length ? "From" : "From: " + state.email;
@@ -4046,10 +4208,11 @@ for (const t of document.querySelectorAll(".tabs .tab")) t.addEventListener("cli
 
 $("open-settings").addEventListener("click", () => openSettings());
 
-async function openSettings() {
+async function openSettings(lookOf = null) {
   try {
     const s = await invoke("get_settings");
     showSettingsTab("account");
+    renderAccountLooks(lookOf);
     $("set-bcc").value = s.default_bcc;
     $("settings-email").textContent = "Account: " + s.email;
     $("set-name").value = s.display_name;
