@@ -118,11 +118,14 @@
     <p class="muted" id="loading-text">Starting…</p>
   </section>
 
+  <div id="reader-dock" class="reader-dock" hidden></div>
+
   <!-- Reading an email -->
   <div id="reader" class="reader-backdrop" hidden>
     <article id="reader-article" class="reader">
       <header class="reader-head">
         <h2 id="reader-subject"></h2>
+        <button id="reader-minimize" class="icon-btn" title="Minimize: read other emails meanwhile"><svg class="icon"><use href="#i-minimize"/></svg></button>
         <button id="reader-close" class="icon-btn" title="Close (Esc)"><svg class="icon"><use href="#i-close"/></svg></button>
       </header>
       <!-- Actions on every email of the conversation (shown when it has more than one) -->

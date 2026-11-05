@@ -1592,17 +1592,23 @@ fn open_in_browser(url: &str) -> CmdResult<()> {
     r.map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// WebKit does not let the frame of an email leave for mailto: at all, so the
+/// interface rewrites those links to this reserved address.
+const MAILTO_LINK_HOST: &str = "mailto.invalid";
+
 /// Links clicked inside an email (an isolated frame) never navigate the app:
-/// web links open in the default browser, mailto links in a new email.
+/// web links open in the default browser, mailto links in a new email. The frame
+/// runs no scripts, so WebKit calls no click listener there: this is the only
+/// way a link is noticed, and the `frame-src` of the app must let it get this far.
 fn external_links<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("external-links")
         .on_navigation(|webview, url| match url.scheme() {
-            "http" | "https" if !matches!(url.host_str(), Some("localhost" | "tauri.localhost")) => {
-                let _ = open_in_browser(url.as_str());
+            "http" | "https" if url.host_str() == Some(MAILTO_LINK_HOST) => {
+                let _ = webview.emit("open-link", url.query().unwrap_or_default());
                 false
             }
-            "mailto" => {
-                let _ = webview.emit("open-link", url.as_str());
+            "http" | "https" if url.host_str() != Some("tauri.localhost") => {
+                let _ = open_in_browser(url.as_str());
                 false
             }
             _ => true,

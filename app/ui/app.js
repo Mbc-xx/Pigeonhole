@@ -2647,7 +2647,7 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
-listen("open-link", (ev) => openLink(ev.payload));
+listen("open-link", (ev) => openLink(decodeURIComponent(ev.payload)));
 
 listen("folder-changed", (ev) => {
   if (String(ev.payload).toUpperCase() === "INBOX" && !columnEl(ev.payload)) checkInbox();
@@ -2864,6 +2864,7 @@ function markSelectedRow() {
 }
 
 async function openReader(folder, card, opts = {}) {
+  dropMinimized(folder, card);
   readerCard = { folder, card };
   readerMessage = null;
   readerQuoteShown = false;
@@ -3338,14 +3339,13 @@ function fitFrame(frame) {
   fit();
   new ResizeObserver(fit).observe(doc.body);
   for (const img of doc.images) img.addEventListener("load", fit);
-  // Links open in the default browser (web links) or in a new email (mailto).
-  for (const a of doc.querySelectorAll("a[href]")) a.title = a.getAttribute("href");
-  doc.addEventListener("click", (ev) => {
-    const a = ev.target.closest?.("a[href]");
-    if (!a) return;
-    ev.preventDefault();
-    openLink(a.getAttribute("href"));
-  });
+  // A click on a link is handled by the app itself (external_links in main.rs).
+  for (const a of doc.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href").trim();
+    a.title = href;
+    if (/^mailto:/i.test(href)) a.href = "https://mailto.invalid/?" + encodeURIComponent(href);
+    else if (/^www\./i.test(href)) a.href = "https://" + href;
+  }
 }
 
 function openLink(href) {
@@ -3409,6 +3409,45 @@ function closeReader() {
   markSelectedRow();
 }
 $("reader-close").addEventListener("click", closeReader);
+$("reader-minimize").addEventListener("click", minimizeReader);
+
+const MINIMIZED_MAX = 4;
+let minimizedEmails = [];
+
+/// Puts the open email in a bar at the bottom, to come back to it later.
+function minimizeReader() {
+  if (!readerCard) return;
+  minimizedEmails = [...minimizedEmails, { ...readerCard, thread: readerThread }].slice(-MINIMIZED_MAX);
+  closeReader();
+  renderReaderDock();
+}
+
+function dropMinimized(folder, card) {
+  const left = minimizedEmails.filter((m) => m.folder !== folder || m.card.uid !== card.uid);
+  if (left.length === minimizedEmails.length) return;
+  minimizedEmails = left;
+  renderReaderDock();
+}
+
+function renderReaderDock() {
+  const dock = $("reader-dock");
+  dock.hidden = !minimizedEmails.length;
+  dock.replaceChildren(
+    ...minimizedEmails.map((m) => {
+      const subject = m.card.subject || "(no subject)";
+      const bar = el("div", "reader-bar");
+      const open = el("button", "reader-bar-open", subject);
+      open.title = subject;
+      open.addEventListener("click", () => openReader(m.folder, m.card, { thread: m.thread }));
+      const close = el("button", "icon-btn");
+      close.append(icon("close"));
+      close.title = "Close";
+      close.addEventListener("click", () => dropMinimized(m.folder, m.card));
+      bar.append(open, close);
+      return bar;
+    }),
+  );
+}
 $("reader").addEventListener("click", (ev) => {
   if (ev.target === $("reader")) closeReader();
 });
