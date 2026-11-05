@@ -423,12 +423,16 @@ function accountBadge(a, account) {
 /// The account in use, shown in the top bar.
 async function setAccount(email) {
   state.email = email;
-  accountBadge($("account-avatar"), { email });
-  $("account-name").textContent = email;
-  $("account-btn").title = `${email}: switch account`;
+  paintAccountButton({ email });
   const accounts = await invoke("list_accounts").catch(() => []);
   const account = accounts.find((a) => a.email === email);
-  if (account && state.email === email) accountBadge($("account-avatar"), account);
+  if (account && state.email === email) paintAccountButton(account);
+}
+
+function paintAccountButton(account) {
+  accountBadge($("account-avatar"), account);
+  $("account-name").textContent = account.label || account.email;
+  $("account-btn").title = `${account.email}: switch account`;
 }
 
 /// Moving to another account starts the interface again, so nothing may be in progress.
@@ -466,24 +470,25 @@ function popAccountMenu(fill) {
   return popMenuAt(r.left, r.bottom + 6, fill);
 }
 
-/// One line of the account menu: the account, and a button to change its icon.
+/// One line of the account menu: the account, and a button to change how it appears.
 function accountRow(account) {
   const here = account.email === state.email;
   const row = el("div", "account-row");
-  const open = menuButton("check", account.email, () => {
+  const open = menuButton("check", account.label || account.email, () => {
     closeConvMenu();
     if (!here) switchAccount(account.email);
   });
   const check = open.firstChild;
   check.replaceWith(accountBadge(el("span", "avatar"), account));
   open.lastChild.className = "account-address";
+  if (account.label) open.lastChild.append(el("small", "", account.email));
   const unread = el("span", "account-unread", state.accountUnread[account.email] || "");
   open.append(unread);
   if (here) open.append(check);
   const edit = menuButton("compose", "", () => editAccountLook(account));
   edit.classList.add("account-edit");
-  edit.title = "Change icon";
-  edit.setAttribute("aria-label", `Change the icon of ${account.email}`);
+  edit.title = "Change label and icon";
+  edit.setAttribute("aria-label", `Change the label and icon of ${account.email}`);
   row.append(open, edit);
   updateAccountUnread(account.email, unread);
   return row;
@@ -525,12 +530,13 @@ async function openAccountMenu() {
 
 const ACCOUNT_ICONS = ["🏠", "💼", "🏢", "🎓", "🛒", "🧾", "✈️", "❤️", "⭐", "🔒", "🌍", "📰", "⚽", "🎵", "🐾"];
 
-/// Chooses the icon and color of an account; every change is saved at once.
+/// Chooses the label, icon and color of an account; every change is saved at once.
 function editAccountLook(account) {
-  const look = { icon: account.icon || null, color: account.color || null };
+  const look = { icon: account.icon || null, color: account.color || null, label: account.label || null };
   popAccountMenu((menu) => {
     const preview = el("span", "avatar");
     const typed = el("input");
+    const label = el("input");
     const icons = el("div", "look-grid");
     const colors = el("div", "look-grid");
     const choice = (parent, key, value, content) => {
@@ -552,7 +558,7 @@ function editAccountLook(account) {
       Object.assign(look, part);
       paint();
       invoke("set_account_look", { email: account.email, look }).catch((e) => toast(String(e)));
-      if (account.email === state.email) accountBadge($("account-avatar"), { ...account, ...look });
+      if (account.email === state.email) paintAccountButton({ ...account, ...look });
     };
 
     choice(icons, "icon", null, (b) => {
@@ -573,10 +579,16 @@ function editAccountLook(account) {
       change({ icon: parts.map((p) => p.segment).join("") || null });
     });
 
+    label.placeholder = "Label, such as Work";
+    label.maxLength = 30;
+    label.value = look.label || "";
+    label.setAttribute("aria-label", "Label of the account");
+    label.addEventListener("input", () => change({ label: label.value.trim() || null }));
+
     const head = el("div", "look-head");
     head.append(preview, el("span", "account-address", account.email));
     menu.classList.add("look-menu");
-    menu.append(head, icons, colors, typed, el("div", "menu-sep"), menuButton("back", "Back to accounts", openAccountMenu));
+    menu.append(head, label, icons, colors, typed, el("div", "menu-sep"), menuButton("back", "Back to accounts", openAccountMenu));
     paint();
   });
 }

@@ -125,14 +125,16 @@ const ACTIVE_FILE: &str = "active-account";
 /// the accounts so that the menu reads one file and logging in again keeps the choice.
 const LOOKS_FILE: &str = "account-icons.toml";
 
-/// How an account appears in the account menu; empty fields mean its initial and
-/// the color that comes from its address.
+/// How an account appears in the account menu; empty fields mean its initial, the
+/// color that comes from its address, and the address itself as its name.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Look {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// A damaged file only costs the icons, so it never stops the app.
@@ -157,7 +159,7 @@ pub fn looks() -> Result<BTreeMap<String, Look>> {
     Ok(read_looks(&root_dir()?))
 }
 
-/// Sets the icon of an account; an empty [`Look`] goes back to the initial.
+/// Sets the icon and label of an account; an empty [`Look`] goes back to the defaults.
 pub fn set_look(email: &str, look: Look) -> Result<()> {
     write_look(&root_dir()?, email, look)
 }
@@ -344,9 +346,9 @@ mod tests {
     fn account_icons_are_kept_by_address() {
         let root = std::env::temp_dir().join(format!("kanbanmail-looks-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let look = Look { icon: Some("🏠".into()), color: Some("#43a07a".into()) };
+        let look = Look { icon: Some("🏠".into()), color: Some("#43a07a".into()), label: Some("Home".into()) };
         write_look(&root, "Me@Example.com", look.clone()).unwrap();
-        write_look(&root, "other@example.com", Look { icon: Some("AB".into()), color: None }).unwrap();
+        write_look(&root, "other@example.com", Look { icon: Some("AB".into()), ..Look::default() }).unwrap();
         assert_eq!(read_looks(&root).get("me@example.com"), Some(&look));
         write_look(&root, "ME@example.com", Look::default()).unwrap();
         let left = read_looks(&root);

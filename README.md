@@ -135,7 +135,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   the rest of their conversation is in other folders. Archive, delete, pin and drag act
   on the whole conversation.
 - Several accounts: the menu next to the connection light in the top bar
-  lists every account, each with an icon and color you choose and its unread Inbox emails, and adds new ones. Each account has its own board, signatures, senders,
+  lists every account, each with a label, icon and color you choose and its unread Inbox emails, and adds new ones. Each account has its own board, signatures, senders,
   rules and Waiting column; appearance and behavior are shared. Only the account
   in use is followed. iCloud, Gmail and Microsoft have their own choice on the
   login screen: see [Mail services](#mail-services).
