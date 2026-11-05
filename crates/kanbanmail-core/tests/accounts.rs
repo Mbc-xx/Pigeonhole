@@ -1,4 +1,6 @@
 //! Moving between accounts on real files, in a throwaway home folder.
+//! Not on Windows: its configuration folder cannot be redirected to a throwaway one.
+#![cfg(not(windows))]
 
 use kanbanmail_core::account::{self, Account};
 use kanbanmail_core::settings::Settings;
