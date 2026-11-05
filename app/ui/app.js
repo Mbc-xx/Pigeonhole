@@ -1,4 +1,4 @@
-// KanbanMail user interface. Talks to the Rust backend through `invoke`.
+// Pigeonhole user interface. Talks to the Rust backend through `invoke`.
 const { invoke: tauriInvoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 

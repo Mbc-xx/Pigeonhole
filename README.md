@@ -1,10 +1,17 @@
-# KanbanMail
+# Pigeonhole
 
-A kanban companion for your IMAP mailbox: every board column is an IMAP folder,
+A kanban companion for your IMAP mailboxes: every board column is an IMAP folder,
 and dragging an email from one column to another really moves it on the server.
-Written in Rust with [Tauri](https://tauri.app).
+Several accounts, each with its own board. Written in Rust with
+[Tauri](https://tauri.app).
 
-> Status: **in development**.
+> Status: **alpha**. See the [releases](https://github.com/Mbc-xx/Pigeonhole/releases).
+
+Pigeonhole grew out of [KanbanMail](https://github.com/Mbc-xx/KanbanMail), the
+single-account app, and carries on its full history. KanbanMail stays available
+as a stable app of its own; the two can run side by side, each with its own
+accounts and data. Internal names such as the `kanbanmail-core` crate and the
+`KANBANMAIL_*` build variables come from there.
 
 ![The board: every column is an IMAP folder](docs/screenshot-board.png)
 
@@ -127,8 +134,7 @@ Written in Rust with [Tauri](https://tauri.app).
   read it, ⌄ closes it. Replies show › even when
   the rest of their conversation is in other folders. Archive, delete, pin and drag act
   on the whole conversation.
-- Several accounts (2.0 alpha, named Pigeonhole so that it can run next to
-  KanbanMail with its own accounts and data): the menu next to the connection light in the top bar
+- Several accounts: the menu next to the connection light in the top bar
   lists every account, each with an icon and color you choose and its unread Inbox emails, and adds new ones. Each account has its own board, signatures, senders,
   rules and Waiting column; appearance and behavior are shared. Only the account
   in use is followed. iCloud, Gmail and Microsoft have their own choice on the
@@ -336,7 +342,7 @@ From the settings button on the board, grouped in tabs:
   choose.
 
 They are stored in `account.toml` and `settings.toml` in the configuration folder
-(`~/Library/Application Support/KanbanMail` on macOS), next to `board.toml`. The
+(`~/Library/Application Support/Pigeonhole` on macOS), next to `board.toml`. The
 password is in the system keychain. Nothing is synced to iCloud; removing the app
 leaves these files in place. "Export settings…" saves columns, signature, rules,
 folders and settings (never the password) to a JSON file in Downloads;
@@ -346,7 +352,7 @@ SMTP details only if it is for the same email address).
 ## Configuring columns
 
 On first run, `board.toml` is created in the configuration folder
-(`~/Library/Application Support/KanbanMail` on macOS):
+(`~/Library/Application Support/Pigeonhole` on macOS):
 
 ```toml
 max_cards_per_column = 200
@@ -367,7 +373,7 @@ editing.
 
 ## Copy on this Mac
 
-The local copy is a SQLite database in `~/Library/Caches/KanbanMail` (one file
+The local copy is a SQLite database in `~/Library/Caches/Pigeonhole` (one file
 per account). It holds the cards of the folders you opened, the content of the
 emails you read or that were downloaded in the background (emails over 3 MB
 only when opened), a full-text index for search and the changes waiting for the
@@ -382,7 +388,7 @@ stored there.
 If the server supports IDLE, the app keeps one extra connection on the Inbox
 and is notified of changes right away (including those made by other clients).
 The other columns are checked every 60 seconds on the main connection. In
-total KanbanMail uses two connections, plus a short-lived one while searching
+total Pigeonhole uses two connections, plus a short-lived one while searching
 or reading your sent emails, and one while emails are being downloaded in the
 background (it is closed when there is nothing left to download).
 
@@ -452,14 +458,14 @@ cargo run -p kanbanmail-cli -- reset
 
 ## Not supported yet
 
-Multiple accounts, snoozing, keyboard shortcuts, printing.
+Snoozing, keyboard shortcuts, printing.
 
 ## Icons
 
 The interface uses a small set of original line icons drawn as inline SVG
 (`app/ui/index.html`), so no icon font or external file is loaded. The app icon
-is drawn in `app/icon.svg`; `npx tauri icon icon.svg` (in `app/`) makes every
-size from it.
+is drawn in `app/src-tauri/icons/icon-source.svg`; `npx tauri icon` (in `app/`)
+makes every size from a 1024 px rendering of it.
 
 ## License
 

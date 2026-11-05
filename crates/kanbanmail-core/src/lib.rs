@@ -1,4 +1,4 @@
-//! Shared KanbanMail logic: configuration, credentials, IMAP and SMTP.
+//! Shared Pigeonhole logic: configuration, credentials, IMAP and SMTP.
 
 pub mod account;
 pub mod board;
