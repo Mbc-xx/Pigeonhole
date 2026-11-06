@@ -302,16 +302,109 @@ function offerUndo(message, moves) {
 
 // ---------- appearance ----------
 
+// A theme of one's own is a color: every tone is worked out from it in OKLCH, where
+// equal steps of lightness look equal, and text is moved until it is readable.
+const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const linearToSrgb = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055);
+const hexChannels = (hex) => [1, 3, 5].map((i) => srgbToLinear(parseInt(hex.slice(i, i + 2), 16) / 255));
+
+function hexToOklch(hex) {
+  const [r, g, b] = hexChannels(hex);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return { L: 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, C: Math.hypot(A, B), H: Math.atan2(B, A) };
+}
+
+function oklchToLinear({ L, C, H }) {
+  const A = C * Math.cos(H);
+  const B = C * Math.sin(H);
+  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+  const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+  const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
+}
+
+/// Less saturated until the screen can show it.
+function oklchToHex(color) {
+  let c = color;
+  let rgb = oklchToLinear(c);
+  while (rgb.some((v) => v < -0.0005 || v > 1.0005) && c.C > 0) rgb = oklchToLinear((c = { ...c, C: c.C - 0.004 }));
+  return "#" + rgb.map((v) => Math.round(linearToSrgb(Math.min(1, Math.max(0, v))) * 255).toString(16).padStart(2, "0")).join("");
+}
+
+function contrast(a, b) {
+  const luminance = (hex) => {
+    const [r, g, b] = hexChannels(hex);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/// The color moved just enough in lightness to be readable on `surface`.
+function readableOn(surface, color, lighter) {
+  const c = { ...color };
+  for (let i = 0; i < 60 && contrast(oklchToHex(c), surface) < 4.5; i++) c.L += lighter ? 0.01 : -0.01;
+  return oklchToHex(c);
+}
+
+/// "custom:#e0683c:dark:tinted" as stored in the settings.
+function parseCustomTheme(theme) {
+  const [name, color, mode, tint] = (theme || "").split(":");
+  if (name !== "custom" || !/^#[0-9a-f]{6}$/i.test(color)) return null;
+  return { color, mode: mode === "light" ? "light" : "dark", tint: tint === "tinted" ? "tinted" : "neutral" };
+}
+
+function customThemeVars({ color, mode, tint }) {
+  const dark = mode === "dark";
+  const base = hexToOklch(color);
+  const tinted = tint === "tinted";
+  const tone = (L, C = dark ? 0.022 : 0.016) => oklchToHex({ L, C: tinted ? C : 0, H: base.H });
+  const card = dark ? tone(0.265) : "#ffffff";
+  const accent = dark && base.L < 0.45 ? oklchToHex({ ...base, L: 0.6 }) : color;
+  return {
+    "--bg": tone(dark ? 0.19 : 0.965),
+    "--panel": tone(dark ? 0.225 : 0.935),
+    "--card": card,
+    "--text": tone(dark ? 0.95 : 0.24, 0.006),
+    "--muted": tone(dark ? 0.72 : 0.48, 0.01),
+    "--border": tone(dark ? 0.34 : 0.88),
+    "--accent": accent,
+    "--accent-text": contrast(accent, "#ffffff") >= 3.2 ? "#ffffff" : tone(0.2, 0.01),
+    "--accent-ink": readableOn(card, hexToOklch(accent), dark),
+    "--pin": dark ? "#f0a43a" : "#b86a06",
+    "--pinned-bg": dark ? "#3a3021" : "#fff6e5",
+    "--error": dark ? "#f97066" : "#b42318",
+    "--drop": `color-mix(in srgb, ${accent} ${dark ? 26 : 16}%, transparent)`,
+    "color-scheme": mode,
+  };
+}
+let customThemeNames = [];
+
 /// Theme ("system", "light", "dark") and interface size (percent).
 /// Theme, size and preview lines: { theme, zoom, preview_board, preview_list }.
 function applyAppearance(a) {
   const root = document.documentElement;
-  if (a.theme && a.theme !== "system") root.dataset.theme = a.theme;
+  const custom = parseCustomTheme(a.theme);
+  for (const name of customThemeNames) root.style.removeProperty(name);
+  customThemeNames = [];
+  delete root.dataset.customMode;
+  if (custom) {
+    root.dataset.theme = "custom";
+    root.dataset.customMode = custom.mode;
+    const vars = customThemeVars(custom);
+    customThemeNames = Object.keys(vars);
+    for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
+  } else if (a.theme && a.theme !== "system") root.dataset.theme = a.theme;
   else delete root.dataset.theme;
   root.style.zoom = String((a.zoom || 100) / 100);
   root.dataset.previewBoard = String(a.preview_board ?? 2);
   root.dataset.previewList = String(a.preview_list ?? 1);
   root.dataset.compactActions = String(a.compact_actions ?? true);
+  root.dataset.mailSurface = a.mail_surface || "light";
   local.set("appearance", JSON.stringify(a));
 }
 try {
@@ -321,12 +414,15 @@ try {
 
 /// The appearance chosen in the settings dialog (previewed before saving).
 function appearanceFromForm() {
+  const theme = $("set-theme").value;
+  $("custom-theme").hidden = theme !== "custom";
   return {
-    theme: $("set-theme").value,
+    theme: theme === "custom" ? `custom:${$("set-theme-color").value}:${$("set-theme-mode").value}:${$("set-theme-tint").value}` : theme,
     zoom: parseInt($("set-zoom").value, 10),
     preview_board: parseInt($("set-preview-board").value, 10),
     preview_list: parseInt($("set-preview-list").value, 10),
     compact_actions: $("set-compact").checked,
+    mail_surface: $("set-mail-surface").value,
   };
 }
 
@@ -975,7 +1071,7 @@ function applySettingsState(settings) {
   state.notify = settings.notify || "important";
   state.undoSeconds = settings.undo_seconds ?? 8;
   state.undoSendSeconds = settings.undo_send_seconds ?? 10;
-  state.appearance = { theme: settings.theme, zoom: settings.zoom, preview_board: settings.preview_board, preview_list: settings.preview_list, compact_actions: settings.compact_actions };
+  state.appearance = { theme: settings.theme, zoom: settings.zoom, preview_board: settings.preview_board, preview_list: settings.preview_list, compact_actions: settings.compact_actions, mail_surface: settings.mail_surface };
   state.askConversation = settings.ask_conversation ?? true;
   applyAppearance(state.appearance);
   state.waitingSetting = settings.waiting_folder || "";
@@ -3359,6 +3455,21 @@ function openLink(href) {
   }
 }
 
+/// A dark place for emails: their HTML has its own colors, so the whole frame is
+/// inverted down to the color of the background, and pictures are turned back
+/// (invert and contrast together exactly undo that on the way through the frame).
+function darkFrameLook() {
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--mail-bg").trim();
+  if (!/^#[0-9a-f]{6}$/i.test(bg)) return null;
+  const level = [1, 3, 5].reduce((sum, i) => sum + parseInt(bg.slice(i, i + 2), 16), 0) / 765;
+  if (level > 0.5) return null;
+  const strength = (1 - level).toFixed(3);
+  return {
+    frame: `invert(${strength}) hue-rotate(180deg)`,
+    inside: `img,video{filter:invert(1) contrast(${(1 / (1 - 2 * level)).toFixed(3)}) hue-rotate(180deg)}`,
+  };
+}
+
 function renderReaderBody() {
   const msg = readerMessage;
   const body = $("reader-body");
@@ -3374,10 +3485,12 @@ function renderReaderBody() {
     frame.setAttribute("sandbox", "allow-same-origin");
     frame.addEventListener("load", () => fitFrame(frame));
     frame.setAttribute("referrerpolicy", "no-referrer");
+    const dark = darkFrameLook();
+    if (dark) frame.style.filter = dark.frame;
     frame.srcdoc =
       `<!doctype html><html><head><meta charset="utf-8">` +
       `<meta http-equiv="Content-Security-Policy" content="${readerRemoteAllowed ? FRAME_CSP_REMOTE_IMAGES : FRAME_CSP}">` +
-      `<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:16px;color:#1c1f24;overflow-wrap:anywhere}img{max-width:100%}</style>` +
+      `<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:16px;color:#1c1f24;overflow-wrap:anywhere}img{max-width:100%}${dark?.inside || ""}</style>` +
       `</head><body>${html}</body></html>`;
     body.replaceChildren(frame);
     $("reader-toggle").textContent = "Show plain text";
@@ -3982,9 +4095,11 @@ async function setPreview(on) {
   const html = await invoke("render_markdown", { text: $("compose-body").value }).catch((e) => `<p>${escapeHtml(String(e))}</p>`);
   const frame = document.createElement("iframe");
   frame.setAttribute("sandbox", "");
+  const dark = darkFrameLook();
+  if (dark) frame.style.filter = dark.frame;
   frame.srcdoc =
     `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}">` +
-    `<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:12px 14px;color:#1c1f24}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}blockquote{border-left:3px solid #ccc;margin-left:0;padding-left:10px;color:#555}</style>` +
+    `<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:12px 14px;color:#1c1f24}img{max-width:100%}${dark?.inside || ""}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}blockquote{border-left:3px solid #ccc;margin-left:0;padding-left:10px;color:#555}</style>` +
     `</head><body>${html}</body></html>`;
   $("compose-preview-pane").replaceChildren(frame);
 }
@@ -4264,11 +4379,12 @@ async function openSettings(lookOf = null) {
     $("set-remote").checked = s.load_remote_images;
     $("set-same-domain").checked = s.important_same_domain;
     $("set-group").checked = s.group_threads;
-    $("set-theme").value = s.theme || "system";
+    showThemeInForm(s.theme || "system");
     $("set-zoom").value = String(s.zoom || 100);
     $("set-preview-board").value = String(s.preview_board ?? 2);
     $("set-preview-list").value = String(s.preview_list ?? 1);
     $("set-compact").checked = s.compact_actions ?? true;
+    $("set-mail-surface").value = s.mail_surface || "light";
     $("set-ask-conv").checked = s.ask_conversation ?? true;
     renderWaitingChoices(s.waiting_folder || "");
     $("set-waiting-days").value = String(s.waiting_days ?? 3);
@@ -4306,11 +4422,36 @@ async function openSettings(lookOf = null) {
 
 $("set-never").addEventListener("change", (ev) => ($("set-seconds").disabled = ev.target.checked));
 // Theme and size preview while choosing; Cancel restores the saved ones.
-for (const id of ["set-theme", "set-zoom", "set-preview-board", "set-preview-list", "set-compact"]) {
-  $(id).addEventListener("change", () => applyAppearance(appearanceFromForm()));
+for (const id of ["set-theme", "set-theme-mode", "set-theme-tint", "set-mail-surface", "set-zoom", "set-preview-board", "set-preview-list", "set-compact"]) {
+  $(id).addEventListener("change", () => {
+    applyAppearance(appearanceFromForm());
+    if (readerMessage) renderReaderBody();
+  });
+}
+$("set-theme-color").addEventListener("input", () => applyAppearance(appearanceFromForm()));
+for (const color of AVATAR_COLORS) {
+  const b = el("button");
+  b.type = "button";
+  b.style.background = color;
+  b.setAttribute("aria-label", color);
+  b.addEventListener("click", () => {
+    $("set-theme-color").value = color;
+    applyAppearance(appearanceFromForm());
+  });
+  $("theme-swatches").append(b);
+}
+
+function showThemeInForm(theme) {
+  const custom = parseCustomTheme(theme);
+  $("set-theme").value = custom ? "custom" : theme;
+  $("custom-theme").hidden = !custom;
+  $("set-theme-color").value = custom?.color || AVATAR_COLORS[0];
+  $("set-theme-mode").value = custom?.mode || "dark";
+  $("set-theme-tint").value = custom?.tint || "neutral";
 }
 function closeSettingsWithoutSaving() {
   if (state.appearance) applyAppearance(state.appearance);
+  if (readerMessage) renderReaderBody();
   $("settings").hidden = true;
 }
 $("settings-cancel").addEventListener("click", closeSettingsWithoutSaving);
