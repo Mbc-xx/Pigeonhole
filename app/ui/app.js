@@ -2813,13 +2813,13 @@ function renderAttachments(folder, uid, list) {
   box.replaceChildren(
     ...list.map((a) => {
       const chip = el("button", "attachment");
-      chip.title = `Save ${a.name} to Downloads`;
+      chip.title = `Save ${a.name}`;
       chip.append(icon("paperclip"), el("span", "att-name", a.name), el("span", "att-size muted", formatSize(a.size)), icon("download", "att-dl"));
       chip.addEventListener("click", async () => {
         chip.disabled = true;
         try {
           const path = await invoke("save_attachment", { folder, uid, index: a.index });
-          toast("Saved to " + path, "info");
+          if (path) toast("Saved to " + path, "info");
         } catch (e) {
           toast("Could not save the attachment: " + e);
         } finally {
@@ -4452,6 +4452,7 @@ async function openSettings(lookOf = null) {
     renderFolderPrefs();
     $("set-allow").value = s.important_allow.join("\n");
     $("set-block").value = s.important_block.join("\n");
+    showSaveFolder(s.save_folder || "ask");
     $("set-never").checked = s.mark_read_after_seconds < 0;
     $("set-seconds").value = Math.max(0, s.mark_read_after_seconds < 0 ? 3 : s.mark_read_after_seconds);
     $("set-seconds").disabled = s.mark_read_after_seconds < 0;
@@ -4516,6 +4517,7 @@ $("settings-form").addEventListener("submit", async (ev) => {
         smtp_server: $("set-smtp").value,
         smtp_port: parseInt($("set-port").value, 10),
         mark_read_after_seconds: seconds,
+        save_folder: saveFolderFromForm(),
         signature: mainSignature.signature,
         signature_html: mainSignature.signature_html,
         default_bcc: $("set-bcc").value,
@@ -4572,10 +4574,37 @@ $("settings-form").addEventListener("submit", async (ev) => {
 
 // ---------- export / import ----------
 
+// ---------- where files are saved ----------
+
+function showSaveFolder(value) {
+  const preset = value === "ask" || value === "downloads";
+  $("set-save-where").value = preset ? value : "folder";
+  $("save-folder-path").textContent = preset ? "" : value;
+  $("save-folder-row").hidden = preset;
+}
+
+const saveFolderFromForm = () => {
+  const where = $("set-save-where").value;
+  return where === "folder" ? $("save-folder-path").textContent || "ask" : where;
+};
+
+async function chooseSaveFolder() {
+  const folder = await invoke("pick_save_folder").catch(() => null);
+  if (folder) $("save-folder-path").textContent = folder;
+  showSaveFolder(saveFolderFromForm());
+}
+
+$("set-save-where").addEventListener("change", () => {
+  const folder = $("set-save-where").value === "folder";
+  $("save-folder-row").hidden = !folder;
+  if (folder && !$("save-folder-path").textContent) chooseSaveFolder();
+});
+$("save-folder-pick").addEventListener("click", chooseSaveFolder);
+
 $("export-settings").addEventListener("click", async () => {
   try {
     const path = await invoke("export_settings");
-    toast("Settings saved to " + path, "info");
+    if (path) toast("Settings saved to " + path, "info");
   } catch (e) {
     toast("Export failed: " + e);
   }

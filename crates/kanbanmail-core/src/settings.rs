@@ -86,6 +86,9 @@ pub struct Settings {
     /// Where emails are read and written: "light", "dark" or "theme".
     #[serde(default = "default_mail_surface")]
     pub mail_surface: String,
+    /// Where files are saved: "ask", "downloads" or the path of a folder.
+    #[serde(default = "default_save_folder")]
+    pub save_folder: String,
     /// Archive, delete, spam and move on a conversation of several emails ask
     /// whether to act on the open email only or on the whole conversation.
     #[serde(default = "default_true")]
@@ -173,6 +176,10 @@ fn default_notify() -> String {
     "important".into()
 }
 
+fn default_save_folder() -> String {
+    "ask".into()
+}
+
 fn default_mail_surface() -> String {
     "light".into()
 }
@@ -249,6 +256,7 @@ impl Default for Settings {
             prefetch: true,
             compact_actions: true,
             mail_surface: default_mail_surface(),
+            save_folder: default_save_folder(),
             ask_conversation: true,
             senders: Vec::new(),
         }
@@ -330,6 +338,7 @@ impl Settings {
             prefetch: from.prefetch,
             compact_actions: from.compact_actions,
             mail_surface: from.mail_surface.clone(),
+            save_folder: from.save_folder.clone(),
             ask_conversation: from.ask_conversation,
             ..self
         }

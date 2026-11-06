@@ -117,7 +117,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   opened the email): load them per email with "Load images", or always from
   the settings. Inline images embedded in the email are always shown.
 - Attachments listed in the reader with their size; click one to save it to
-  your Downloads folder (it is then shown in Finder). Cards with attachments
+  the folder you choose (Settings → Reading: ask every time, Downloads or a folder of yours). Cards with attachments
   show a paperclip.
 - Sidebar with "New email", the "Important only" and "Unread only" filters (as
   icons with their counts) and every folder (Trash, Sent, Junk, subfolders…)
@@ -348,7 +348,7 @@ They are stored in `account.toml` and `settings.toml` in the configuration folde
 (`~/Library/Application Support/Pigeonhole` on macOS), next to `board.toml`. The
 password is in the system keychain. Nothing is synced to iCloud; removing the app
 leaves these files in place. "Export settings…" saves columns, signature, rules,
-folders and settings (never the password) to a JSON file in Downloads;
+folders and settings (never the password) to a JSON file, saved like attachments;
 "Import settings…" applies such a file on another computer (sender name and
 SMTP details only if it is for the same email address).
 

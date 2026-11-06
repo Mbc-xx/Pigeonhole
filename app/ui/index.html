@@ -518,6 +518,17 @@
             <input id="set-seconds" type="number" min="0" max="600" step="1">
           </label>
           <label class="toggle"><input id="set-never" type="checkbox"> Never automatically (manual only)</label>
+          <label>Save attachments and exported settings
+            <select id="set-save-where">
+              <option value="ask">Ask every time</option>
+              <option value="downloads">Downloads folder</option>
+              <option value="folder">A folder of my choice</option>
+            </select>
+          </label>
+          <div id="save-folder-row" class="settings-buttons" hidden>
+            <button type="button" id="save-folder-pick">Choose folder…</button>
+            <span id="save-folder-path" class="muted small"></span>
+          </div>
           <label>Undo after archiving, deleting or moving
             <select id="set-undo">
               <option value="0">Off</option>

@@ -1279,19 +1279,47 @@ fn set_window_title(title: String, window: tauri::WebviewWindow) -> CmdResult<()
     window.set_title(&title).map_err(|e| e.to_string())
 }
 
-/// Saves an attachment to the Downloads folder and shows it in the file manager.
-/// Returns the saved file path.
+/// Writes a file where the settings say: the system's Save panel, Downloads or a
+/// folder of the user's. Returns its path, or None if the panel was cancelled.
+async fn save_file(window: &tauri::Window, name: &str, bytes: &[u8]) -> CmdResult<Option<String>> {
+    let chosen = Settings::load().map_err(err)?.save_folder;
+    let asked = chosen == "ask";
+    let path = if asked {
+        let picked = rfd::AsyncFileDialog::new().set_title("Save").set_parent(window).set_file_name(name).save_file().await;
+        let Some(file) = picked else { return Ok(None) };
+        file.path().to_path_buf()
+    } else if chosen == "downloads" {
+        let dirs = directories::UserDirs::new();
+        let dir = dirs.as_ref().and_then(|d| d.download_dir()).ok_or("cannot find the Downloads folder")?;
+        unique_path(dir, name)
+    } else {
+        let dir = std::path::Path::new(&chosen);
+        if !dir.is_dir() {
+            return Err(format!("the folder {chosen} is not there: choose another one in Settings → Reading"));
+        }
+        unique_path(dir, name)
+    };
+    std::fs::write(&path, bytes).map_err(|e| format!("cannot save {}: {e}", path.display()))?;
+    // Whoever just chose the place knows where it is.
+    if !asked {
+        reveal_in_file_manager(&path);
+    }
+    Ok(Some(path.display().to_string()))
+}
+
+/// The folder for saved files, from the system's panel.
 #[tauri::command]
-async fn save_attachment(folder: String, uid: u32, index: usize, state: State<'_, AppState>) -> CmdResult<String> {
+async fn pick_save_folder(window: tauri::Window) -> Option<String> {
+    let folder = rfd::AsyncFileDialog::new().set_title("Folder for saved files").set_parent(&window).pick_folder().await?;
+    Some(folder.path().display().to_string())
+}
+
+/// Saves an attachment; see [`save_file`].
+#[tauri::command]
+async fn save_attachment(folder: String, uid: u32, index: usize, window: tauri::Window, state: State<'_, AppState>) -> CmdResult<Option<String>> {
     let raw = raw_email(&state, &folder, uid).await?;
     let (name, bytes) = kanbanmail_core::message::attachment(&raw, index).ok_or("attachment not found")?;
-    let dir = directories::UserDirs::new()
-        .and_then(|d| d.download_dir().map(|p| p.to_path_buf()))
-        .ok_or("cannot find the Downloads folder")?;
-    let path = unique_path(&dir, &safe_file_name(&name));
-    std::fs::write(&path, bytes).map_err(|e| format!("cannot save {}: {e}", path.display()))?;
-    reveal_in_file_manager(&path);
-    Ok(path.display().to_string())
+    save_file(&window, &safe_file_name(&name), &bytes).await
 }
 
 /// Keeps only characters that are safe in a file name on every system.
@@ -1511,9 +1539,9 @@ struct ExportAccount {
 }
 
 /// Saves account details (no password), board columns and settings to a JSON
-/// file in Downloads and shows it in the file manager. Returns its path.
+/// file; see [`save_file`].
 #[tauri::command]
-async fn export_settings(state: State<'_, AppState>) -> CmdResult<String> {
+async fn export_settings(window: tauri::Window, state: State<'_, AppState>) -> CmdResult<Option<String>> {
     let acc = state.inner.lock().await.account.clone().ok_or("no account configured")?;
     let file = ExportFile {
         app: "KanbanMail".into(),
@@ -1529,13 +1557,7 @@ async fn export_settings(state: State<'_, AppState>) -> CmdResult<String> {
         settings: Settings::load().map_err(err)?,
     };
     let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
-    let dir = directories::UserDirs::new()
-        .and_then(|d| d.download_dir().map(|p| p.to_path_buf()))
-        .ok_or("cannot find the Downloads folder")?;
-    let path = unique_path(&dir, "KanbanMail-settings.json");
-    std::fs::write(&path, json).map_err(|e| format!("cannot save {}: {e}", path.display()))?;
-    reveal_in_file_manager(&path);
-    Ok(path.display().to_string())
+    save_file(&window, "KanbanMail-settings.json", json.as_bytes()).await
 }
 
 /// Applies an exported settings file: board columns and settings always; the
@@ -1737,6 +1759,7 @@ fn main() {
             save_draft,
             discard_draft,
             save_attachment,
+            pick_save_folder,
             load_thread,
             set_unread_badge,
             set_sender_rule,
