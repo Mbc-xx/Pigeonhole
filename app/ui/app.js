@@ -362,7 +362,7 @@ function customThemeVars({ color, mode, tint }) {
   const dark = mode === "dark";
   const base = hexToOklch(color);
   const tinted = tint === "tinted";
-  const tone = (L, C = tinted ? (dark ? 0.022 : 0.016) : 0.008) => oklchToHex({ L, C, H: tinted ? base.H : 1.1 });
+  const tone = (L, C = dark ? 0.022 : 0.016) => oklchToHex({ L, C: tinted ? C : 0, H: base.H });
   const card = dark ? tone(0.265) : "#ffffff";
   const accent = dark && base.L < 0.45 ? oklchToHex({ ...base, L: 0.6 }) : color;
   return {
@@ -404,6 +404,7 @@ function applyAppearance(a) {
   root.dataset.previewBoard = String(a.preview_board ?? 2);
   root.dataset.previewList = String(a.preview_list ?? 1);
   root.dataset.compactActions = String(a.compact_actions ?? true);
+  root.dataset.mailSurface = a.mail_surface || "light";
   local.set("appearance", JSON.stringify(a));
 }
 try {
@@ -421,6 +422,7 @@ function appearanceFromForm() {
     preview_board: parseInt($("set-preview-board").value, 10),
     preview_list: parseInt($("set-preview-list").value, 10),
     compact_actions: $("set-compact").checked,
+    mail_surface: $("set-mail-surface").value,
   };
 }
 
@@ -1069,7 +1071,7 @@ function applySettingsState(settings) {
   state.notify = settings.notify || "important";
   state.undoSeconds = settings.undo_seconds ?? 8;
   state.undoSendSeconds = settings.undo_send_seconds ?? 10;
-  state.appearance = { theme: settings.theme, zoom: settings.zoom, preview_board: settings.preview_board, preview_list: settings.preview_list, compact_actions: settings.compact_actions };
+  state.appearance = { theme: settings.theme, zoom: settings.zoom, preview_board: settings.preview_board, preview_list: settings.preview_list, compact_actions: settings.compact_actions, mail_surface: settings.mail_surface };
   state.askConversation = settings.ask_conversation ?? true;
   applyAppearance(state.appearance);
   state.waitingSetting = settings.waiting_folder || "";
@@ -3453,6 +3455,21 @@ function openLink(href) {
   }
 }
 
+/// A dark place for emails: their HTML has its own colors, so the whole frame is
+/// inverted down to the color of the background, and pictures are turned back
+/// (invert and contrast together exactly undo that on the way through the frame).
+function darkFrameLook() {
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--mail-bg").trim();
+  if (!/^#[0-9a-f]{6}$/i.test(bg)) return null;
+  const level = [1, 3, 5].reduce((sum, i) => sum + parseInt(bg.slice(i, i + 2), 16), 0) / 765;
+  if (level > 0.5) return null;
+  const strength = (1 - level).toFixed(3);
+  return {
+    frame: `invert(${strength}) hue-rotate(180deg)`,
+    inside: `img,video{filter:invert(1) contrast(${(1 / (1 - 2 * level)).toFixed(3)}) hue-rotate(180deg)}`,
+  };
+}
+
 function renderReaderBody() {
   const msg = readerMessage;
   const body = $("reader-body");
@@ -3468,10 +3485,12 @@ function renderReaderBody() {
     frame.setAttribute("sandbox", "allow-same-origin");
     frame.addEventListener("load", () => fitFrame(frame));
     frame.setAttribute("referrerpolicy", "no-referrer");
+    const dark = darkFrameLook();
+    if (dark) frame.style.filter = dark.frame;
     frame.srcdoc =
       `<!doctype html><html><head><meta charset="utf-8">` +
       `<meta http-equiv="Content-Security-Policy" content="${readerRemoteAllowed ? FRAME_CSP_REMOTE_IMAGES : FRAME_CSP}">` +
-      `<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:16px;color:#1c1f24;overflow-wrap:anywhere}img{max-width:100%}</style>` +
+      `<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:16px;color:#1c1f24;overflow-wrap:anywhere}img{max-width:100%}${dark?.inside || ""}</style>` +
       `</head><body>${html}</body></html>`;
     body.replaceChildren(frame);
     $("reader-toggle").textContent = "Show plain text";
@@ -4076,9 +4095,11 @@ async function setPreview(on) {
   const html = await invoke("render_markdown", { text: $("compose-body").value }).catch((e) => `<p>${escapeHtml(String(e))}</p>`);
   const frame = document.createElement("iframe");
   frame.setAttribute("sandbox", "");
+  const dark = darkFrameLook();
+  if (dark) frame.style.filter = dark.frame;
   frame.srcdoc =
     `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}">` +
-    `<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:12px 14px;color:#1c1f24}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}blockquote{border-left:3px solid #ccc;margin-left:0;padding-left:10px;color:#555}</style>` +
+    `<style>body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:12px 14px;color:#1c1f24}img{max-width:100%}${dark?.inside || ""}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}blockquote{border-left:3px solid #ccc;margin-left:0;padding-left:10px;color:#555}</style>` +
     `</head><body>${html}</body></html>`;
   $("compose-preview-pane").replaceChildren(frame);
 }
@@ -4363,6 +4384,7 @@ async function openSettings(lookOf = null) {
     $("set-preview-board").value = String(s.preview_board ?? 2);
     $("set-preview-list").value = String(s.preview_list ?? 1);
     $("set-compact").checked = s.compact_actions ?? true;
+    $("set-mail-surface").value = s.mail_surface || "light";
     $("set-ask-conv").checked = s.ask_conversation ?? true;
     renderWaitingChoices(s.waiting_folder || "");
     $("set-waiting-days").value = String(s.waiting_days ?? 3);
@@ -4400,8 +4422,11 @@ async function openSettings(lookOf = null) {
 
 $("set-never").addEventListener("change", (ev) => ($("set-seconds").disabled = ev.target.checked));
 // Theme and size preview while choosing; Cancel restores the saved ones.
-for (const id of ["set-theme", "set-theme-mode", "set-theme-tint", "set-zoom", "set-preview-board", "set-preview-list", "set-compact"]) {
-  $(id).addEventListener("change", () => applyAppearance(appearanceFromForm()));
+for (const id of ["set-theme", "set-theme-mode", "set-theme-tint", "set-mail-surface", "set-zoom", "set-preview-board", "set-preview-list", "set-compact"]) {
+  $(id).addEventListener("change", () => {
+    applyAppearance(appearanceFromForm());
+    if (readerMessage) renderReaderBody();
+  });
 }
 $("set-theme-color").addEventListener("input", () => applyAppearance(appearanceFromForm()));
 for (const color of AVATAR_COLORS) {
@@ -4426,6 +4451,7 @@ function showThemeInForm(theme) {
 }
 function closeSettingsWithoutSaving() {
   if (state.appearance) applyAppearance(state.appearance);
+  if (readerMessage) renderReaderBody();
   $("settings").hidden = true;
 }
 $("settings-cancel").addEventListener("click", closeSettingsWithoutSaving);

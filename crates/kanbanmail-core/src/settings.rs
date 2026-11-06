@@ -83,6 +83,9 @@ pub struct Settings {
     /// The actions of an open email as icons only (the name in the tooltip).
     #[serde(default = "default_true")]
     pub compact_actions: bool,
+    /// Where emails are read and written: "light", "dark" or "theme".
+    #[serde(default = "default_mail_surface")]
+    pub mail_surface: String,
     /// Archive, delete, spam and move on a conversation of several emails ask
     /// whether to act on the open email only or on the whole conversation.
     #[serde(default = "default_true")]
@@ -170,6 +173,10 @@ fn default_notify() -> String {
     "important".into()
 }
 
+fn default_mail_surface() -> String {
+    "light".into()
+}
+
 fn default_theme() -> String {
     "system".into()
 }
@@ -241,6 +248,7 @@ impl Default for Settings {
             cache_max_mb: default_cache_mb(),
             prefetch: true,
             compact_actions: true,
+            mail_surface: default_mail_surface(),
             ask_conversation: true,
             senders: Vec::new(),
         }
@@ -321,6 +329,7 @@ impl Settings {
             cache_max_mb: from.cache_max_mb,
             prefetch: from.prefetch,
             compact_actions: from.compact_actions,
+            mail_surface: from.mail_surface.clone(),
             ask_conversation: from.ask_conversation,
             ..self
         }

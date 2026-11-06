@@ -108,6 +108,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   answer Accept / Maybe / Decline (sent to the organizer) or add the event to
   your calendar app.
 - A theme of your own from any color: every tone is worked out from it and text stays readable.
+- Emails are read and written on a light or dark background, or the one of the theme, whatever the colors of the app.
 - Light, dark or system theme, six colored themes (Sand, Rose, Mint, Ocean,
   Forest, Midnight) and four interface sizes.
 - Preview text: none, 1 or 2 lines, on board cards and (separately) in folder

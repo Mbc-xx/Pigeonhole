@@ -372,7 +372,7 @@
         </section>
 
         <section class="tab-panel" data-panel="appearance" role="tabpanel" hidden>
-          <p class="muted small">Changes apply right away so you can see them; Save keeps them, Cancel goes back. Emails you receive are always shown on a white background.</p>
+          <p class="muted small">Changes apply right away so you can see them; Save keeps them, Cancel goes back.</p>
           <div class="row-2">
             <label>Theme
               <select id="set-theme">
@@ -411,6 +411,13 @@
               <select id="set-theme-tint"><option value="neutral">Neutral</option><option value="tinted">Tinted</option></select>
             </label>
           </div>
+          <label>Where emails are read and written
+            <select id="set-mail-surface">
+              <option value="light">Always light</option>
+              <option value="dark">Always dark</option>
+              <option value="theme">Same as the theme</option>
+            </select>
+          </label>
           <div class="row-2 even">
             <label>Preview on board cards
               <select id="set-preview-board">
