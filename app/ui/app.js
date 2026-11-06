@@ -82,6 +82,17 @@ function toast(message, kind = "error", action = null, seconds = null) {
     });
     el.append(b);
   }
+  // Closing only takes the message away: what it announces carries on.
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.append(icon("close"));
+  close.title = "Close";
+  close.setAttribute("aria-label", "Close");
+  close.addEventListener("click", () => {
+    clearTimeout(toastTimer);
+    el.hidden = true;
+  });
+  el.append(close);
   el.className = "toast" + (kind.startsWith("info") ? " " + kind : "");
   el.hidden = false;
   clearTimeout(toastTimer);
@@ -4025,6 +4036,37 @@ for (const b of document.querySelectorAll("#rich-toolbar [data-rich]")) {
     rememberRich();
   });
 }
+/// Font and size go in the style of the text: a <font> tag would be lost when the
+/// email is shown again, here and by some mail programs.
+function richStyle(select, command) {
+  select.addEventListener("change", () => {
+    const value = select.value;
+    select.value = "";
+    if (!value) return;
+    restoreRich();
+    document.execCommand("styleWithCSS", false, true);
+    document.execCommand(command, false, value);
+    document.execCommand("styleWithCSS", false, false);
+    rememberRich();
+  });
+}
+richStyle($("rich-font"), "fontName");
+richStyle($("rich-size"), "fontSize");
+// Tab moves a list item in and out; elsewhere it keeps leaving the field.
+const RICH_SHORTCUTS = { b: "bold", i: "italic", u: "underline" };
+$("compose-rich").addEventListener("keydown", (ev) => {
+  const shortcut = (ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && RICH_SHORTCUTS[ev.key.toLowerCase()];
+  if (shortcut) {
+    ev.preventDefault();
+    document.execCommand(shortcut);
+    return;
+  }
+  const node = window.getSelection().anchorNode;
+  const inList = (node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement)?.closest("li");
+  if (ev.key !== "Tab" || !inList) return;
+  ev.preventDefault();
+  document.execCommand(ev.shiftKey ? "outdent" : "indent");
+});
 $("rich-link").addEventListener("mousedown", (ev) => ev.preventDefault());
 $("rich-link").addEventListener("click", () => {
   rememberRich();
@@ -4163,7 +4205,8 @@ function renderComposeSender() {
   const account = currentAccount();
   const badge = $("compose-account");
   badge.hidden = !severalAccounts();
-  badge.replaceChildren(accountBadge(el("span", "avatar"), account), el("span", "", account.label || ""));
+  badge.replaceChildren(accountBadge(el("span", "avatar"), account));
+  badge.title = account.label || account.email;
   const select = $("compose-sender");
   select.hidden = !state.senders.length;
   $("compose-from").textContent = state.senders.length ? "From" : "From: " + state.email;

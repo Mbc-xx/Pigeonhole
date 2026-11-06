@@ -224,7 +224,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   too. An attachment whose content cannot be read is refused instead of being
   sent empty.
 - Plain text, Markdown (bold, italic, lists, links, headings, tables and inline
-  HTML, with a preview) or Rich: a visual editor with bold, italic, underline,
+  HTML, with a preview) or Rich: a visual editor with font, size, bold, italic, underline, list indent,
   lists, quotes and links, where pasted formatting and images are kept. Markdown
   and Rich emails are sent as text + HTML. Sending uses SMTP (port 465 SSL/TLS or 587 STARTTLS, same
   credentials as IMAP) and a copy is saved to the Sent folder.
