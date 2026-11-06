@@ -107,6 +107,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - Calendar invitations (.ics) are shown with date, time, place and organizer;
   answer Accept / Maybe / Decline (sent to the organizer) or add the event to
   your calendar app.
+- A theme of your own from any color: every tone is worked out from it and text stays readable.
 - Light, dark or system theme, six colored themes (Sand, Rose, Mint, Ocean,
   Forest, Midnight) and four interface sizes.
 - Preview text: none, 1 or 2 lines, on board cards and (separately) in folder
@@ -181,7 +182,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - Resizable columns: drag the right edge (minimum 160 px). Columns always fill
   the window and keep their proportions when it is resized; double-click an
   edge for the average width, or press Refresh to make them all equal again.
-- Unread emails stand out: a dot and the subject in the theme color, bold
+- Unread emails stand out: a dot in the theme color, bold
   sender; unread count per column and an
   "Unread only" filter. The number of unread Inbox emails is shown as a badge
   on the app icon in the Dock (only the important ones while "Important only"
