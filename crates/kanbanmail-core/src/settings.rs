@@ -207,6 +207,9 @@ pub struct FolderPref {
     pub name: String,
     #[serde(default)]
     pub hidden: bool,
+    /// Left out of the "Move to…" lists; independent of `hidden`.
+    #[serde(default)]
+    pub hide_in_move: bool,
     /// CSS color like "#4f8fd6", empty for none.
     #[serde(default)]
     pub color: String,

@@ -185,10 +185,11 @@ for (const b of document.querySelectorAll("#selection-bar [data-sel]")) {
     // "Move…" keeps the selection until a folder is chosen.
     if (action === "move") {
       ev.stopPropagation();
+      const from = new Set(members.map((m) => m.folder));
       return showFolderMenu(b, (to) => {
         clearSelection();
         moveMany(members, to);
-      });
+      }, from.size === 1 ? [...from][0] : null);
     }
     clearSelection();
     if (action === "clear" || !members.length) return;
@@ -1630,9 +1631,10 @@ function waitingContext(cards) {
 state.sentCards = [];
 let sentLoadedAt = 0;
 let sentLoading = false;
+const SENT_RECHECK_MS = 3000;
 function refreshSentForWaiting(force = false) {
   const sent = state.folders?.find((f) => f.kind === "sent")?.name;
-  if (!sent || sentLoading || (!force && Date.now() - sentLoadedAt < 60_000)) return;
+  if (!sent || !waitingFolder() || sentLoading || (!force && Date.now() - sentLoadedAt < 60_000)) return;
   sentLoading = true;
   invoke("load_column", { folder: sent, limit: 200 })
     .then((cards) => {
@@ -2053,15 +2055,9 @@ function openCardMenu(c, x, y) {
 
   // "Move to…": the folders in place of the actions, with a way back.
   const fillFolders = (menu) => {
-    const list = targets();
-    const here = new Set(list.map((m) => m.folder));
-    menu.replaceChildren(menuButton("back", "Back", () => fill(menu)), el("div", "menu-sep"));
-    for (const f of state.folders || []) {
-      if (f.selectable === false || folderKind(f.name) === "drafts" || (here.size === 1 && here.has(f.name))) continue;
-      const b = menuButton("folder", folderLabel(f.name), run((l) => moveMany(l, f.name, { conversation: !batch })));
-      b.style.paddingLeft = 10 + (f.depth || 0) * 14 + "px";
-      menu.append(b);
-    }
+    const here = new Set(targets().map((m) => m.folder));
+    const head = [menuButton("back", "Back", () => fill(menu)), el("div", "menu-sep")];
+    fillMoveList(menu, head, here.size === 1 ? [...here][0] : null, (to) => run((l) => moveMany(l, to, { conversation: !batch }))());
   };
 
   popMenuAt(x, y, fill).classList.add("card-menu");
@@ -2433,7 +2429,7 @@ function openAllMail() {
 
 // ---------- folder order, visibility and colors ----------
 
-state.folderPrefs = []; // [{ name, hidden, color }] in the chosen order
+state.folderPrefs = []; // [{ name, hidden, hide_in_move, color }] in the chosen order
 const FOLDER_COLORS = ["", "#4f8fd6", "#43a07a", "#d08a2c", "#d0574f", "#8a6fd1", "#3e9bb0", "#c45f9b", "#8a8f98"];
 
 function folderPref(name) {
@@ -3284,21 +3280,37 @@ function chooseScope(anchor, verb, allText) {
   });
 }
 
+/// Fills `menu` with the folders offered for a move, in the sidebar's order
+/// and without the ones left out in Settings → Folders; "All folders…" brings
+/// those back for the odd email. `here` is the folder the emails are in.
+function fillMoveList(menu, head, here, pick, all = false) {
+  const can = orderedFolders(true).filter((f) => f.selectable !== false && f.name !== here && folderKind(f.name) !== "drafts");
+  const shown = all ? can : can.filter((f) => !folderPref(f.name)?.hide_in_move);
+  menu.replaceChildren(...head);
+  for (const f of shown) {
+    const b = menuButton("folder", folderLabel(f.name), () => pick(f.name));
+    b.style.paddingLeft = 10 + (f.depth || 0) * 14 + "px";
+    menu.append(b);
+  }
+  if (shown.length < can.length) {
+    if (shown.length) menu.append(el("div", "menu-sep"));
+    menu.append(menuButton("folder", "All folders…", () => {
+      fillMoveList(menu, head, here, pick, true);
+      // The longer list must stay on screen.
+      menu.style.top = Math.max(8, Math.min(menu.offsetTop, window.innerHeight - menu.offsetHeight - 8)) + "px";
+    }));
+  }
+}
+
 /// The folders an email can be moved to, as a menu under `anchor`.
-function showFolderMenu(anchor, pick) {
+function showFolderMenu(anchor, pick, here = readerCard?.folder) {
   if (document.querySelector(".conv-menu.folders")) return closeConvMenu();
-  const here = readerCard?.folder;
   popMenu(anchor, (menu) => {
     menu.classList.add("folders");
-    for (const f of state.folders || []) {
-      if (f.selectable === false || f.name === here || folderKind(f.name) === "drafts") continue;
-      const b = menuButton("folder", folderLabel(f.name), () => {
-        closeConvMenu();
-        pick(f.name);
-      });
-      b.style.paddingLeft = 10 + (f.depth || 0) * 14 + "px";
-      menu.append(b);
-    }
+    fillMoveList(menu, [], here, (to) => {
+      closeConvMenu();
+      pick(to);
+    });
   });
 }
 
@@ -4347,12 +4359,27 @@ async function sendPending(pending) {
     if (result.warning) toast(result.warning);
     else toast(`Email sent (copy saved to ${result.saved_to})`, "info");
     refreshSentForWaiting(true);
+    if (result.saved_to) showSentCopy(result.saved_to, pending.reply);
   } catch (e) {
     toast("Sending failed: " + e, "error", { label: "Open", run: () => reopenPending(pending) });
   }
   state.sending--;
   const drafts = state.folders.find((f) => f.kind === "drafts")?.name;
   if (drafts && columnEl(drafts)) loadColumn(drafts);
+}
+
+/// Puts the copy of a sent email on screen. A server that saves it by itself
+/// (Gmail) may take a moment, so there is one more look shortly after.
+function showSentCopy(folder, reply) {
+  scheduleReload(folder);
+  setTimeout(() => {
+    scheduleReload(folder);
+    refreshSentForWaiting(true);
+    // The conversation open in the reader gets the reply too.
+    if (reply && readerMessage && readerCard?.folder === reply.folder && readerCard.card.uid === reply.uid) {
+      loadThread(readerCard.folder, readerCard.card, readerMessage);
+    }
+  }, SENT_RECHECK_MS);
 }
 
 /// "Undo": the email is not sent and goes back to the composer.
@@ -4848,12 +4875,14 @@ let prefsDragFrom = null; // index of the folder being dragged in the settings
 /// Every server folder in the current order, with its preferences.
 function mergeFolderPrefs(prefs) {
   state.folderPrefs = prefs;
-  return orderedFolders(true).map((f) => ({ name: f.name, hidden: !!folderPref(f.name)?.hidden, color: folderPref(f.name)?.color || "" }));
+  return orderedFolders(true).map((f) => ({ name: f.name, hidden: !!folderPref(f.name)?.hidden, hide_in_move: !!folderPref(f.name)?.hide_in_move, color: folderPref(f.name)?.color || "" }));
 }
 
 function renderFolderPrefs() {
   const box = $("folder-prefs");
-  box.replaceChildren();
+  const head = el("div", "folder-pref fp-head muted small");
+  head.append(el("span"), el("span", "", "Sidebar"), el("span", "", "Move to"));
+  box.replaceChildren(head);
   prefsDraft.forEach((p, i) => {
     const f = state.folders.find((x) => x.name === p.name);
     const row = el("div", "folder-pref" + (p.hidden ? " hidden-folder" : ""));
@@ -4901,6 +4930,14 @@ function renderFolderPrefs() {
       p.hidden = !show.checked;
       row.classList.toggle("hidden-folder", p.hidden);
     });
+    const move = el("input");
+    move.type = "checkbox";
+    move.checked = !p.hide_in_move;
+    move.title = "Offer in the Move to… lists";
+    move.disabled = f?.selectable === false || folderKind(p.name) === "drafts"; // never offered
+    move.addEventListener("change", () => {
+      p.hide_in_move = !move.checked;
+    });
     const color = el("button", "fp-color" + (p.color ? "" : " none"));
     color.type = "button";
     color.title = "Click to change the color";
@@ -4912,10 +4949,15 @@ function renderFolderPrefs() {
     const label = el("div", "fp-label");
     label.append(el("span", "", (f?.depth ? "↳ " : "") + (f?.label || p.name)));
     const path = el("span", "fp-path muted", f && f.label !== p.name ? p.name : "");
-    row.append(grip, show, color, label, path);
+    row.append(grip, show, move, color, label, path);
     box.append(row);
   });
 }
+
+$("move-like-sidebar").addEventListener("click", () => {
+  for (const p of prefsDraft) p.hide_in_move = p.hidden;
+  renderFolderPrefs();
+});
 
 // ---------- signature editor ----------
 

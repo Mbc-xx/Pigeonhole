@@ -146,6 +146,8 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   Junk and Drafts too) in one list, each tagged with its folder; a conversation
   shows the tags of the folders it is in. What you type there searches every
   folder on the server, older emails included.
+- Move to… lists: the folders offered are chosen apart from the sidebar, one tick per
+  folder or copied from it (Settings → Folders); "All folders…" shows the others when needed.
 - Sidebar folders: choose which ones to show, drag them into your order and pick a color
   (Settings → Folders). The color also marks the board column and the folder
   tags in search results and All Mail.
@@ -338,7 +340,7 @@ From the settings button on the board, grouped in tabs:
   conversation", notifications, seconds before an opened email is marked as
   read, grouping by conversation, remote images.
 - **Important**: colleagues of your domain, "always" and "never important" lists.
-- **Folders**: which folders the sidebar shows, their order and colors.
+- **Folders**: which folders the sidebar and the Move to… lists show, their order and colors.
 - **Rules**: automatic rules for new Inbox emails.
 - **Appearance**: theme, interface size, preview lines and compact email
   actions, previewed while you
