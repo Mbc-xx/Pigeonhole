@@ -17,6 +17,8 @@
     <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></symbol>
     <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></symbol>
+    <symbol id="i-indent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M12 10h8M12 14h8M4 19h16M4 9l4 3-4 3z"/></symbol>
+    <symbol id="i-outdent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M12 10h8M12 14h8M4 19h16M8 9l-4 3 4 3z"/></symbol>
     <symbol id="i-quote" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14M10 8h9M10 12h9M10 16h6"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></symbol>
     <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.25 4.1 1 5.8L12 16.9l-5.25 2.7 1-5.8L3.5 9.7l5.9-.9z"/></symbol>
@@ -231,25 +233,42 @@
           <button type="button" id="fmt-md" role="radio" title="**bold**, *italic*, lists, [links](https://…), tables and inline HTML">Markdown</button>
           <button type="button" id="fmt-rich" role="radio" title="Visual editor: bold, italic, lists, links, pasted formatting and images">Rich</button>
         </div>
-        <button type="button" id="compose-preview" title="Preview the formatted email"><svg class="icon"><use href="#i-eye"/></svg><span>Preview</span></button>
-        <span class="spacer"></span>
-        <span id="compose-size" class="muted small"></span>
-      </div>
-      <div id="compose-attachments" class="attachments compose-files" hidden></div>
       <div id="rich-toolbar" class="sig-toolbar rich-toolbar" hidden>
         <button type="button" class="icon-btn" data-rich="bold" title="Bold (⌘B)"><b>B</b></button>
         <button type="button" class="icon-btn" data-rich="italic" title="Italic (⌘I)"><i>I</i></button>
         <button type="button" class="icon-btn" data-rich="underline" title="Underline (⌘U)"><u>U</u></button>
         <button type="button" class="icon-btn" data-rich="insertUnorderedList" title="Bulleted list"><svg class="icon"><use href="#i-list"/></svg></button>
         <button type="button" class="icon-btn" data-rich="insertOrderedList" title="Numbered list"><b>1.</b></button>
+        <button type="button" class="icon-btn" data-rich="outdent" title="Less indent (⇧Tab in a list)"><svg class="icon"><use href="#i-outdent"/></svg></button>
+        <button type="button" class="icon-btn" data-rich="indent" title="More indent (Tab in a list)"><svg class="icon"><use href="#i-indent"/></svg></button>
         <button type="button" class="icon-btn" data-rich="blockquote" title="Quote"><svg class="icon"><use href="#i-quote"/></svg></button>
         <button type="button" class="icon-btn" id="rich-link" title="Add a link"><svg class="icon"><use href="#i-link"/></svg></button>
         <button type="button" class="icon-btn" data-rich="removeFormat" title="Remove formatting"><svg class="icon"><use href="#i-eraser"/></svg></button>
+        <select id="rich-font" aria-label="Font" title="Font">
+          <option value="">Font</option>
+          <option value="Arial, Helvetica, sans-serif">Arial</option>
+          <option value="Verdana, Geneva, sans-serif">Verdana</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="'Times New Roman', Times, serif">Times</option>
+          <option value="'Courier New', Courier, monospace">Courier</option>
+        </select>
+        <select id="rich-size" aria-label="Size" title="Size">
+          <option value="">Size</option>
+          <option value="2">Small</option>
+          <option value="3">Normal</option>
+          <option value="4">Large</option>
+          <option value="6">Huge</option>
+        </select>
         <span id="rich-link-row" class="sig-link-row" hidden>
           <input id="rich-link-url" type="url" placeholder="https://example.com">
           <button type="button" id="rich-link-add">Add link</button>
         </span>
       </div>
+        <button type="button" id="compose-preview" title="Preview the formatted email"><svg class="icon"><use href="#i-eye"/></svg><span>Preview</span></button>
+        <span class="spacer"></span>
+        <span id="compose-size" class="muted small"></span>
+      </div>
+      <div id="compose-attachments" class="attachments compose-files" hidden></div>
       <textarea id="compose-body" spellcheck="true"></textarea>
       <div id="compose-rich" class="compose-rich" contenteditable="true" spellcheck="true" hidden></div>
       <div id="compose-preview-pane" class="compose-preview" hidden></div>
@@ -499,6 +518,17 @@
             <input id="set-seconds" type="number" min="0" max="600" step="1">
           </label>
           <label class="toggle"><input id="set-never" type="checkbox"> Never automatically (manual only)</label>
+          <label>Save attachments and exported settings
+            <select id="set-save-where">
+              <option value="ask">Ask every time</option>
+              <option value="downloads">Downloads folder</option>
+              <option value="folder">A folder of my choice</option>
+            </select>
+          </label>
+          <div id="save-folder-row" class="settings-buttons" hidden>
+            <button type="button" id="save-folder-pick">Choose folder…</button>
+            <span id="save-folder-path" class="muted small"></span>
+          </div>
           <label>Undo after archiving, deleting or moving
             <select id="set-undo">
               <option value="0">Off</option>
@@ -525,7 +555,8 @@
         </section>
 
         <section class="tab-panel" data-panel="folders" role="tabpanel" hidden>
-          <p class="muted small">Drag the folders to change their order, choose which ones appear in the sidebar and give them a color. The color also marks the board column and the folder tags in search results and All Mail.</p>
+          <p class="muted small">Drag the folders to change their order, choose which ones appear in the sidebar and in the Move to… lists, and give them a color. The color also marks the board column and the folder tags in search results and All Mail.</p>
+          <div class="settings-buttons"><button type="button" id="move-like-sidebar">Move to: same folders as the sidebar</button></div>
           <div id="folder-prefs" class="folder-prefs"></div>
         </section>
 

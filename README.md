@@ -117,7 +117,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   opened the email): load them per email with "Load images", or always from
   the settings. Inline images embedded in the email are always shown.
 - Attachments listed in the reader with their size; click one to save it to
-  your Downloads folder (it is then shown in Finder). Cards with attachments
+  the folder you choose (Settings → Reading: ask every time, Downloads or a folder of yours). Cards with attachments
   show a paperclip.
 - Sidebar with "New email", the "Important only" and "Unread only" filters (as
   icons with their counts) and every folder (Trash, Sent, Junk, subfolders…)
@@ -146,6 +146,8 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   Junk and Drafts too) in one list, each tagged with its folder; a conversation
   shows the tags of the folders it is in. What you type there searches every
   folder on the server, older emails included.
+- Move to… lists: the folders offered are chosen apart from the sidebar, one tick per
+  folder or copied from it (Settings → Folders); "All folders…" shows the others when needed.
 - Sidebar folders: choose which ones to show, drag them into your order and pick a color
   (Settings → Folders). The color also marks the board column and the folder
   tags in search results and All Mail.
@@ -224,7 +226,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   too. An attachment whose content cannot be read is refused instead of being
   sent empty.
 - Plain text, Markdown (bold, italic, lists, links, headings, tables and inline
-  HTML, with a preview) or Rich: a visual editor with bold, italic, underline,
+  HTML, with a preview) or Rich: a visual editor with font, size, bold, italic, underline, list indent,
   lists, quotes and links, where pasted formatting and images are kept. Markdown
   and Rich emails are sent as text + HTML. Sending uses SMTP (port 465 SSL/TLS or 587 STARTTLS, same
   credentials as IMAP) and a copy is saved to the Sent folder.
@@ -338,7 +340,7 @@ From the settings button on the board, grouped in tabs:
   conversation", notifications, seconds before an opened email is marked as
   read, grouping by conversation, remote images.
 - **Important**: colleagues of your domain, "always" and "never important" lists.
-- **Folders**: which folders the sidebar shows, their order and colors.
+- **Folders**: which folders the sidebar and the Move to… lists show, their order and colors.
 - **Rules**: automatic rules for new Inbox emails.
 - **Appearance**: theme, interface size, preview lines and compact email
   actions, previewed while you
@@ -348,7 +350,7 @@ They are stored in `account.toml` and `settings.toml` in the configuration folde
 (`~/Library/Application Support/Pigeonhole` on macOS), next to `board.toml`. The
 password is in the system keychain. Nothing is synced to iCloud; removing the app
 leaves these files in place. "Export settings…" saves columns, signature, rules,
-folders and settings (never the password) to a JSON file in Downloads;
+folders and settings (never the password) to a JSON file, saved like attachments;
 "Import settings…" applies such a file on another computer (sender name and
 SMTP details only if it is for the same email address).
 
