@@ -992,7 +992,7 @@ body.resizing { cursor: col-resize; user-select: none; }
   background: var(--panel); color: var(--muted); border: 1px solid var(--border);
 }
 .folder-prefs { display: flex; flex-direction: column; gap: 2px; }
-.column-pref { grid-template-columns: auto 1fr 1fr auto; }
+.folder-pref.column-pref { grid-template-columns: auto 1fr 1fr auto; }
 .column-pref input { font-weight: normal; }
 .rule-prefs { display: flex; flex-direction: column; gap: 6px; }
 .rule-pref { display: grid; grid-template-columns: 110px 1fr auto 1fr auto; gap: 6px; align-items: center; }
@@ -1013,7 +1013,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .pref-remove:hover { color: var(--error); }
 .folder-pref {
   display: grid;
-  grid-template-columns: 16px 48px 48px 22px 1fr auto;
+  grid-template-columns: auto auto 22px 1fr auto;
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
@@ -1025,7 +1025,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .folder-pref:hover { background: var(--panel); }
 .folder-pref.fp-head { cursor: default; padding-block: 0; font-size: 11px; }
 .folder-pref.fp-head:hover { background: none; }
-.folder-pref > :nth-child(2), .folder-pref > :nth-child(3) { justify-self: center; white-space: nowrap; }
+/* Settings → Folders: two tick columns (sidebar, Move to) under their headings. */
+#folder-prefs .folder-pref { grid-template-columns: 16px 48px 48px 22px 1fr auto; }
+#folder-prefs .folder-pref > :nth-child(2), #folder-prefs .folder-pref > :nth-child(3) { justify-self: center; white-space: nowrap; }
 .folder-pref.hidden-folder .fp-label { opacity: 0.45; }
 .folder-pref .fp-grip { color: var(--muted); display: flex; }
 .folder-pref:hover .fp-grip { color: var(--text); }
