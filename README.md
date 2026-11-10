@@ -146,6 +146,12 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   Junk and Drafts too) in one list, each tagged with its folder; a conversation
   shows the tags of the folders it is in. What you type there searches every
   folder on the server, older emails included.
+- Tasks: link an email or a conversation to a task kept elsewhere (Jira and the like) by
+  pasting its web link, from the reader, the right-click menu or by dropping a card on a
+  task in the sidebar. The task shows as a tag on the email and on the replies that
+  follow; the sidebar has a Tasks tab beside Folders, with a field to find a task, and
+  a click shows all the emails of one. The links
+  stay on your computer, in a file beside the settings, and are part of the exported settings.
 - Move to… lists: the folders offered are chosen apart from the sidebar, one tick per
   folder or copied from it (Settings → Folders); "All folders…" shows the others when needed.
 - Sidebar folders: choose which ones to show, drag them into your order and pick a color
@@ -202,8 +208,9 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - An opened email is marked as read after a configurable number of seconds
   (0 = immediately, or never); read/unread can also be toggled by hand.
 - The compose area is always light, like the reader.
-- Recipients appear as chips with the person's name: double-click one to see
-  its address, click to select it (⌘-click for more), drag the selection
+- Recipients appear as chips with the person's name: double-click one to edit
+  it as "Name <address>" (typing a name before a bare address is enough), click to
+  select it (⌘-click for more), copy the selection with ⌘C, drag it
   between To, Cc and Bcc, and remove it with × or Backspace. Pasting a list
   (one per line, from a spreadsheet, an Outlook "Rossi, Mario <m@x.it>;" list
   or any text) turns every address found around an @ into a chip, with the

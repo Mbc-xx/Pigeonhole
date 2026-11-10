@@ -108,8 +108,16 @@
         </div>
         <button id="nav-board" class="nav-item active" title="Board"><svg class="icon"><use href="#i-board"/></svg><span class="label">Board</span></button>
         <button id="nav-all" class="nav-item" title="All Mail"><svg class="icon"><use href="#i-allmail"/></svg><span class="label">All Mail</span></button>
-        <div class="nav-title muted">Folders</div>
+        <div id="side-tabs" class="side-tabs" hidden>
+          <button type="button" data-side="folders" class="active">Folders</button>
+          <button type="button" data-side="tasks" title="Tasks (Jira and the like) linked to emails">Tasks</button>
+        </div>
+        <div id="folders-title" class="nav-title muted">Folders</div>
         <nav id="folder-list"></nav>
+        <div id="task-pane" class="task-pane" hidden>
+          <input id="task-filter" type="search" placeholder="Find a task" autocomplete="off" spellcheck="false" aria-label="Find a task">
+          <nav id="task-list"></nav>
+        </div>
       </aside>
       <main id="board" class="board"></main>
     </div>
@@ -157,6 +165,7 @@
             <dt>To</dt><dd id="reader-to"></dd>
             <dt id="reader-cc-label">Cc</dt><dd id="reader-cc"></dd>
           </dl>
+          <div id="reader-tasks" class="reader-tasks" hidden></div>
           <!-- Actions on this email only -->
           <div class="reader-actions">
             <button id="reader-reply" title="Reply"><svg class="icon"><use href="#i-reply"/></svg><span>Reply</span></button>
@@ -169,6 +178,7 @@
             <button id="reader-trash" title="Delete this email (move to trash)"><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
             <button id="reader-spam" title="Move to Junk"><svg class="icon"><use href="#i-junk"/></svg><span>Spam</span></button>
             <button id="reader-move" title="Move this email to a folder…"><svg class="icon"><use href="#i-folder"/></svg><span>Move</span></button>
+            <button id="reader-task" title="Link this email to a task (Jira and the like)…"><svg class="icon"><use href="#i-link"/></svg><span>Task</span></button>
             <span id="reader-seen-hint" class="muted"></span>
           </div>
           <div class="reader-sender">

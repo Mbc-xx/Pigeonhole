@@ -9,3 +9,4 @@ pub mod secret;
 pub mod settings;
 pub mod smtp;
 pub mod store;
+pub mod tasks;
