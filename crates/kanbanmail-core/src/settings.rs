@@ -104,6 +104,10 @@ pub struct Settings {
     /// Where emails are read and written: "light", "dark" or "theme".
     #[serde(default = "default_mail_surface")]
     pub mail_surface: String,
+    /// Each account keeps its own theme and email background; otherwise
+    /// they are the same for every account.
+    #[serde(default)]
+    pub theme_per_account: bool,
     /// Where files are saved: "ask", "downloads" or the path of a folder.
     #[serde(default = "default_save_folder")]
     pub save_folder: String,
@@ -286,6 +290,7 @@ impl Default for Settings {
             prefetch: true,
             compact_actions: true,
             mail_surface: default_mail_surface(),
+            theme_per_account: false,
             save_folder: default_save_folder(),
             ask_conversation: true,
             senders: Vec::new(),
@@ -358,7 +363,7 @@ impl Settings {
             load_remote_images: from.load_remote_images,
             group_threads: from.group_threads,
             notify: from.notify.clone(),
-            theme: from.theme.clone(),
+            theme: if from.theme_per_account { self.theme.clone() } else { from.theme.clone() },
             zoom: from.zoom,
             undo_seconds: from.undo_seconds,
             undo_send_seconds: from.undo_send_seconds,
@@ -367,11 +372,18 @@ impl Settings {
             cache_max_mb: from.cache_max_mb,
             prefetch: from.prefetch,
             compact_actions: from.compact_actions,
-            mail_surface: from.mail_surface.clone(),
+            mail_surface: if from.theme_per_account { self.mail_surface.clone() } else { from.mail_surface.clone() },
+            theme_per_account: from.theme_per_account,
             save_folder: from.save_folder.clone(),
             ask_conversation: from.ask_conversation,
             ..self
         }
+    }
+
+    /// The settings of a new account: the shared preferences, and the look of
+    /// the account it was added from as a start even when each has its own.
+    pub fn for_new_account(from: &Settings) -> Settings {
+        Settings { theme: from.theme.clone(), mail_surface: from.mail_surface.clone(), ..Settings::default() }.with_shared_from(from)
     }
 
     /// Passes the shared preferences on to the other accounts.
@@ -407,6 +419,21 @@ mod tests {
         assert_eq!((other.theme.as_str(), other.zoom), ("dark", 120));
         assert_eq!(other.signature, "Theirs");
         assert_eq!(other.waiting_folder, "");
+    }
+
+    #[test]
+    fn the_theme_is_shared_unless_each_account_has_its_own() {
+        let mine = Settings { theme: "ocean".into(), mail_surface: "dark".into(), zoom: 110, ..Settings::default() };
+        let other = Settings { theme: "rose".into(), ..Settings::default() };
+        let shared = other.clone().with_shared_from(&mine);
+        assert_eq!((shared.theme.as_str(), shared.mail_surface.as_str()), ("ocean", "dark"));
+        let own = Settings { theme_per_account: true, ..mine.clone() };
+        let kept = other.with_shared_from(&own);
+        assert_eq!((kept.theme.as_str(), kept.mail_surface.as_str(), kept.zoom), ("rose", "light", 110));
+        assert!(kept.theme_per_account);
+        // A new account starts with the look of the one it was added from.
+        let new = Settings::for_new_account(&own);
+        assert_eq!((new.theme.as_str(), new.mail_surface.as_str()), ("ocean", "dark"));
     }
 
     #[test]
