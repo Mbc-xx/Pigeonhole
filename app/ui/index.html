@@ -108,8 +108,16 @@
         </div>
         <button id="nav-board" class="nav-item active" title="Board"><svg class="icon"><use href="#i-board"/></svg><span class="label">Board</span></button>
         <button id="nav-all" class="nav-item" title="All Mail"><svg class="icon"><use href="#i-allmail"/></svg><span class="label">All Mail</span></button>
-        <div class="nav-title muted">Folders</div>
+        <div id="side-tabs" class="side-tabs" hidden>
+          <button type="button" data-side="folders" class="active">Folders</button>
+          <button type="button" data-side="tasks" title="Tasks (Jira and the like) linked to emails">Tasks</button>
+        </div>
+        <div id="folders-title" class="nav-title muted">Folders</div>
         <nav id="folder-list"></nav>
+        <div id="task-pane" class="task-pane" hidden>
+          <input id="task-filter" type="search" placeholder="Find a task" autocomplete="off" spellcheck="false" aria-label="Find a task">
+          <nav id="task-list"></nav>
+        </div>
       </aside>
       <main id="board" class="board"></main>
     </div>
@@ -157,6 +165,7 @@
             <dt>To</dt><dd id="reader-to"></dd>
             <dt id="reader-cc-label">Cc</dt><dd id="reader-cc"></dd>
           </dl>
+          <div id="reader-tasks" class="reader-tasks" hidden></div>
           <!-- Actions on this email only -->
           <div class="reader-actions">
             <button id="reader-reply" title="Reply"><svg class="icon"><use href="#i-reply"/></svg><span>Reply</span></button>
@@ -169,6 +178,7 @@
             <button id="reader-trash" title="Delete this email (move to trash)"><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
             <button id="reader-spam" title="Move to Junk"><svg class="icon"><use href="#i-junk"/></svg><span>Spam</span></button>
             <button id="reader-move" title="Move this email to a folder…"><svg class="icon"><use href="#i-folder"/></svg><span>Move</span></button>
+            <button id="reader-task" title="Link this email to a task (Jira and the like)…"><svg class="icon"><use href="#i-link"/></svg><span>Task</span></button>
             <span id="reader-seen-hint" class="muted"></span>
           </div>
           <div class="reader-sender">
@@ -387,6 +397,44 @@
             </label>
           </div>
           <p class="muted small">In this column, an email shows “Replied” when an answer in the same conversation has arrived (click it to open the answer), and how long it has been waiting once it passes the time above.</p>
+          <h3 class="settings-sub">Still to do</h3>
+          <div class="row-2 even">
+            <label>Column of emails to do
+              <select id="set-todo"></select>
+            </label>
+            <label>Show how long after
+              <select id="set-todo-days">
+                <option value="0">Never</option>
+                <option value="1">1 day</option>
+                <option value="2">2 days</option>
+                <option value="3">3 days</option>
+                <option value="5">5 days</option>
+                <option value="7">1 week</option>
+                <option value="14">2 weeks</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted small">An email in this column shows how many days it has been there once it passes the time above, in red after twice as long; the column title counts them. Pinned emails count too.</p>
+          <h3 class="settings-sub">Done</h3>
+          <div class="row-2 even">
+            <label>Column of finished emails
+              <select id="set-done"></select>
+            </label>
+            <label>Move them away after
+              <select id="set-done-days">
+                <option value="0">Never (keep them)</option>
+                <option value="3">3 days</option>
+                <option value="7">1 week</option>
+                <option value="14">2 weeks</option>
+                <option value="30">1 month</option>
+                <option value="90">3 months</option>
+              </select>
+            </label>
+          </div>
+          <label id="done-target-row">To the folder
+            <input id="set-done-target" list="folder-names" placeholder="Archive" autocomplete="off" spellcheck="false">
+          </label>
+          <p class="muted small">Leave the folder empty for Archive, or type a name (“Done archive”) to keep finished work apart: it is created if missing. Days count from when the email arrived in the column; pinned and unread emails stay. It happens while Pigeonhole is open, with Undo.</p>
           <datalist id="folder-names"></datalist>
         </section>
 

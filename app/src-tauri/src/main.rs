@@ -12,6 +12,7 @@ use kanbanmail_core::{
     settings::{Sender, Settings},
     smtp::{self, Draft},
     store::Store,
+    tasks::{self, Task},
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -48,6 +49,8 @@ const SENT_COPY_WAIT: Duration = Duration::from_secs(2);
 const MICROSOFT_PERSONAL_SMTP: &str = "smtp-mail.outlook.com";
 /// Error of a sign-in given up by the user: the UI shows nothing for it.
 const CANCELLED: &str = "cancelled";
+/// Error of something given up because the app moved to another account: the UI drops it.
+const LEFT_ACCOUNT: &str = "left this account";
 
 /// The error means the server could not be reached (not that it refused the action).
 fn is_offline(e: &str) -> bool {
@@ -104,8 +107,11 @@ impl AppState {
     /// watchers, the replay of waiting changes, the connection, the local copy.
     async fn stop_account(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
+        LEAVING.store(true, Ordering::SeqCst);
+        LEFT.notify_waiters();
         let _replay = self.replaying.lock().await;
         let mut inner = self.inner.lock().await;
+        LEAVING.store(false, Ordering::SeqCst);
         // Saying goodbye to the server must not hold up the next account.
         if let Some(mut s) = inner.session.take() {
             tauri::async_runtime::spawn(async move {
@@ -185,6 +191,39 @@ macro_rules! with_retry {
                     }
                     eprintln!("IMAP error, reconnecting: {msg}");
                 }
+            }
+        }
+    }};
+}
+
+/// Set while the app moves to another account: what is being read from the
+/// server for the old one is given up, so the move does not wait for it.
+static LEAVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LEFT: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Like `with_retry!`, for reading only: given up at once when the app moves
+/// to another account. Changes (moves, flags, sending) never go through here:
+/// those must finish or be kept for later.
+macro_rules! read_retry {
+    ($inner:ident, |$s:ident, $caps:ident| $body:expr) => {{
+        let left = LEFT.notified();
+        tokio::pin!(left);
+        left.as_mut().enable();
+        let done = if LEAVING.load(Ordering::SeqCst) {
+            None
+        } else {
+            tokio::select! {
+                biased;
+                _ = &mut left => None,
+                res = async { with_retry!($inner, |$s, $caps| $body) } => Some(res),
+            }
+        };
+        match done {
+            Some(res) => res,
+            None => {
+                // Stopped half-way: this connection cannot be trusted any more.
+                $inner.session = None;
+                Err(LEFT_ACCOUNT.to_string())
             }
         }
     }};
@@ -551,6 +590,9 @@ async fn watch_folder(
 enum QueuedOp {
     Move { from: String, uid: u32, to: String },
     File { folder: String, uid: u32, kind: String },
+    /// Several emails of one folder, moved with a single request.
+    MoveMany { from: String, uids: Vec<u32>, to: String },
+    FileMany { folder: String, uids: Vec<u32>, kind: String },
     Pin { folder: String, uid: u32, pinned: bool },
     Seen { folder: String, uids: Vec<u32>, seen: bool },
     Send { draft: Box<Draft>, reply: Option<ReplyTarget> },
@@ -559,8 +601,8 @@ enum QueuedOp {
 impl QueuedOp {
     fn kind(&self) -> &'static str {
         match self {
-            QueuedOp::Move { .. } => "move",
-            QueuedOp::File { .. } => "file",
+            QueuedOp::Move { .. } | QueuedOp::MoveMany { .. } => "move",
+            QueuedOp::File { .. } | QueuedOp::FileMany { .. } => "file",
             QueuedOp::Pin { .. } => "pin",
             QueuedOp::Seen { .. } => "seen",
             QueuedOp::Send { .. } => "send",
@@ -572,6 +614,8 @@ impl QueuedOp {
         match self {
             QueuedOp::Move { to, .. } => format!("moving an email to {to}"),
             QueuedOp::File { kind, .. } => format!("moving an email to {kind}"),
+            QueuedOp::MoveMany { uids, to, .. } => format!("moving {} emails to {to}", uids.len()),
+            QueuedOp::FileMany { uids, kind, .. } => format!("moving {} emails to {kind}", uids.len()),
             QueuedOp::Pin { .. } => "pinning an email".into(),
             QueuedOp::Seen { .. } => "marking emails read/unread".into(),
             QueuedOp::Send { draft, .. } => format!("sending “{}”", draft.subject),
@@ -585,12 +629,21 @@ async fn run_op(state: &AppState, op: &QueuedOp) -> CmdResult<Option<String>> {
         return send_now(state, (**draft).clone(), reply.clone()).await.map(|_| None);
     }
     let mut inner = state.inner.lock().await;
+    // One email or several: the same request to the server.
+    let (one, many): (&[u32], &[u32]) = match op {
+        QueuedOp::Move { uid, .. } | QueuedOp::File { uid, .. } => (std::slice::from_ref(uid), &[]),
+        QueuedOp::MoveMany { uids, .. } | QueuedOp::FileMany { uids, .. } => (&[], uids),
+        _ => (&[], &[]),
+    };
+    let uids = if one.is_empty() { many } else { one };
     match op {
-        QueuedOp::Move { from, uid, to } => with_retry!(inner, |s, caps| imap::move_message(s, caps, from, *uid, to)).map(|_| None),
-        QueuedOp::File { folder, uid, kind } => with_retry!(inner, |s, caps| async {
+        QueuedOp::Move { from, to, .. } | QueuedOp::MoveMany { from, to, .. } => {
+            with_retry!(inner, |s, caps| imap::move_messages(s, caps, from, uids, to)).map(|_| None)
+        }
+        QueuedOp::File { folder, kind, .. } | QueuedOp::FileMany { folder, kind, .. } => with_retry!(inner, |s, caps| async {
             let target = imap::special_folder(s, kind).await?;
             anyhow::ensure!(target != *folder, "the email is already in {target}");
-            imap::move_message(s, caps, folder, *uid, &target).await?;
+            imap::move_messages(s, caps, folder, uids, &target).await?;
             Ok(target)
         })
         .map(Some),
@@ -798,7 +851,7 @@ async fn poll_folders(app: AppHandle, current: Arc<AtomicU64>, generation: u64, 
         let state = app.state::<AppState>();
         let mut inner = state.inner.lock().await;
         for folder in &folders {
-            let fp: Result<_, String> = with_retry!(inner, |s, caps| imap::folder_fingerprint(s, folder, caps));
+            let fp: Result<_, String> = read_retry!(inner, |s, caps| imap::folder_fingerprint(s, folder, caps));
             let Ok(fp) = fp else { continue };
             if last.insert(folder.clone(), fp).is_some_and(|old| old != fp) {
                 app.emit("folder-changed", folder).ok();
@@ -820,7 +873,7 @@ async fn load_column(folder: String, limit: Option<u32>, state: State<'_, AppSta
             .map(|(validity, cards)| FolderCache::from_cards(validity, cards))
             .unwrap_or_default(),
     };
-    let res = with_retry!(inner, |s, _caps| imap::load_cards(s, &folder, &mut cache, limit));
+    let res = read_retry!(inner, |s, _caps| imap::load_cards(s, &folder, &mut cache, limit));
     if let Ok(cards) = &res {
         let complete = (cards.len() as u32) < limit;
         state.with_store(|st| st.save_cards(&folder, cache.uid_validity(), cards, complete));
@@ -849,7 +902,7 @@ async fn raw_email(state: &AppState, folder: &str, uid: u32) -> CmdResult<Vec<u8
     }
     let raw = {
         let mut inner = state.inner.lock().await;
-        with_retry!(inner, |s, _caps| imap::load_raw(s, folder, uid))
+        read_retry!(inner, |s, _caps| imap::load_raw(s, folder, uid))
     };
     match raw {
         Ok(raw) => {
@@ -872,6 +925,27 @@ async fn move_card(from: String, uid: u32, to: String, app: AppHandle, state: St
     let outcome = perform_or_queue(&app, &state, QueuedOp::Move { from: from.clone(), uid, to }).await?;
     state.with_store(|st| st.remove(&from, &[uid]));
     Ok(matches!(outcome, Outcome::Done(_)))
+}
+
+/// Moves several emails of one folder at once. true when moved now, false
+/// when the move waits for the connection.
+#[tauri::command]
+async fn move_cards(from: String, uids: Vec<u32>, to: String, app: AppHandle, state: State<'_, AppState>) -> CmdResult<bool> {
+    let outcome = perform_or_queue(&app, &state, QueuedOp::MoveMany { from: from.clone(), uids: uids.clone(), to }).await?;
+    state.with_store(|st| st.remove(&from, &uids));
+    Ok(matches!(outcome, Outcome::Done(_)))
+}
+
+/// Files several emails of one folder at once (trash, archive, junk). Returns
+/// the destination folder, or "" when the move waits for the connection.
+#[tauri::command]
+async fn file_cards(folder: String, uids: Vec<u32>, kind: String, app: AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
+    let outcome = perform_or_queue(&app, &state, QueuedOp::FileMany { folder: folder.clone(), uids: uids.clone(), kind }).await?;
+    state.with_store(|st| st.remove(&folder, &uids));
+    Ok(match outcome {
+        Outcome::Done(target) => target.unwrap_or_default(),
+        Outcome::Queued => String::new(),
+    })
 }
 
 #[tauri::command]
@@ -957,6 +1031,11 @@ async fn save_settings(settings: SettingsView, state: State<'_, AppState>) -> Cm
         preview_list: s.preview_list.min(2),
         waiting_folder: s.waiting_folder.trim().to_string(),
         waiting_days: s.waiting_days.min(365),
+        todo_folder: s.todo_folder.trim().to_string(),
+        todo_days: s.todo_days.min(365),
+        done_folder: s.done_folder.trim().to_string(),
+        done_days: s.done_days.min(3650),
+        done_target: s.done_target.trim().to_string(),
         cache_max_mb: s.cache_max_mb.clamp(100, 20_000),
         ..s
     };
@@ -1135,7 +1214,7 @@ async fn load_thread(
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<imap::ThreadEntry>> {
     let mut inner = state.inner.lock().await;
-    with_retry!(inner, |s, _caps| async {
+    read_retry!(inner, |s, _caps| async {
         let mut folders = vec![folder.clone(), "INBOX".to_string()];
         for kind in ["sent", "archive"] {
             if let Some(f) = imap::find_special_folder(s, kind).await? {
@@ -1167,6 +1246,53 @@ fn local_thread(message_id: Option<String>, references: Vec<String>, state: Stat
 #[tauri::command]
 fn search_local(query: imap::SearchQuery, state: State<'_, AppState>) -> Vec<imap::ThreadEntry> {
     state.with_store(|st| st.search(&query, 200)).unwrap_or_default()
+}
+
+/// The tasks emails are linked to, most recently linked first.
+#[tauri::command]
+fn list_tasks() -> CmdResult<Vec<Task>> {
+    tasks::load().map_err(err)
+}
+
+/// Changes the tasks of the account in use and returns them all.
+fn change_tasks(change: impl FnOnce(&mut Vec<Task>) -> anyhow::Result<()>) -> CmdResult<Vec<Task>> {
+    let mut list = tasks::load().map_err(err)?;
+    change(&mut list).map_err(err)?;
+    tasks::save(&list).map_err(err)?;
+    Ok(list)
+}
+
+/// Links emails (by Message-ID) to the task at this web address.
+#[tauri::command]
+fn link_task(url: String, ids: Vec<String>) -> CmdResult<Vec<Task>> {
+    change_tasks(|list| tasks::link(list, &url, &ids))
+}
+
+/// Takes emails off a task, or the whole task away when `ids` is not given.
+#[tauri::command]
+fn unlink_task(url: String, ids: Option<Vec<String>>) -> CmdResult<Vec<Task>> {
+    change_tasks(|list| {
+        match ids {
+            Some(ids) => tasks::unlink(list, &url, &ids),
+            None => tasks::remove(list, &url),
+        }
+        Ok(())
+    })
+}
+
+#[tauri::command]
+fn rename_task(url: String, name: String) -> CmdResult<Vec<Task>> {
+    change_tasks(|list| {
+        tasks::rename(list, &url, &name);
+        Ok(())
+    })
+}
+
+/// The emails of a task known to the local copy: the linked ones and the
+/// rest of their conversations (instant, offline).
+#[tauri::command]
+fn task_emails(ids: Vec<String>, state: State<'_, AppState>) -> Vec<imap::ThreadEntry> {
+    state.with_store(|st| st.thread(None, &ids)).unwrap_or_default()
 }
 
 /// Sets the "Important only" rule for a sender (an address or `@domain`):
@@ -1369,7 +1495,7 @@ async fn discard_draft(message_id: String, state: State<'_, AppState>) -> CmdRes
 #[tauri::command]
 async fn list_folders(state: State<'_, AppState>) -> CmdResult<Vec<imap::FolderInfo>> {
     let mut inner = state.inner.lock().await;
-    with_retry!(inner, |s, _caps| imap::folder_tree(s))
+    read_retry!(inner, |s, _caps| imap::folder_tree(s))
 }
 
 /// Unread emails of the given folders. The connection is let go after each one:
@@ -1379,7 +1505,7 @@ async fn folder_unseen(folders: Vec<String>, state: State<'_, AppState>) -> CmdR
     let mut counts = HashMap::new();
     for folder in folders {
         let mut inner = state.inner.lock().await;
-        let count = with_retry!(inner, |s, _caps| imap::folder_unseen(s, &folder))?;
+        let count = read_retry!(inner, |s, _caps| imap::folder_unseen(s, &folder))?;
         counts.insert(folder, count);
     }
     Ok(counts)
@@ -1416,7 +1542,7 @@ async fn load_all_mail(state: State<'_, AppState>) -> CmdResult<Vec<imap::Thread
     let mut guard = state.inner.lock().await;
     let inner = &mut *guard;
     let mut caches = std::mem::take(&mut inner.caches);
-    let res = with_retry!(inner, |s, _caps| async {
+    let res = read_retry!(inner, |s, _caps| async {
         let folders = imap::searchable_folders(s).await?;
         let all = imap::all_mail_folder(s).await?;
         imap::load_all_mail(s, &folders, all.as_deref(), &mut caches, 200).await
@@ -1527,6 +1653,9 @@ struct ExportFile {
     account: ExportAccount,
     board_toml: String,
     settings: Settings,
+    /// Emails linked to tasks; missing in files saved by older versions.
+    #[serde(default)]
+    tasks: Vec<Task>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1555,6 +1684,7 @@ async fn export_settings(window: tauri::Window, state: State<'_, AppState>) -> C
         },
         board_toml: std::fs::read_to_string(board_path().map_err(err)?).unwrap_or_default(),
         settings: Settings::load().map_err(err)?,
+        tasks: tasks::load().map_err(err)?,
     };
     let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
     save_file(&window, "KanbanMail-settings.json", json.as_bytes()).await
@@ -1583,6 +1713,10 @@ async fn import_settings(json: String, state: State<'_, AppState>) -> CmdResult<
         acc.smtp_server = file.account.smtp_server;
         acc.smtp_port = file.account.smtp_port;
         acc.save().map_err(err)?;
+        // The links are about this mailbox's emails: they follow it only.
+        if !file.tasks.is_empty() {
+            tasks::save(&file.tasks).map_err(err)?;
+        }
         Ok("Settings, columns and account details imported.".into())
     } else {
         Ok(format!(
@@ -1617,6 +1751,9 @@ fn open_in_browser(url: &str) -> CmdResult<()> {
 /// WebKit does not let the frame of an email leave for mailto: at all, so the
 /// interface rewrites those links to this reserved address.
 const MAILTO_LINK_HOST: &str = "mailto.invalid";
+/// Links whose text names another site than the one they lead to: the
+/// interface sends them here, to ask before opening them.
+const CHECK_LINK_HOST: &str = "link-check.invalid";
 
 /// Links clicked inside an email (an isolated frame) never navigate the app:
 /// web links open in the default browser, mailto links in a new email. The frame
@@ -1625,7 +1762,7 @@ const MAILTO_LINK_HOST: &str = "mailto.invalid";
 fn external_links<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("external-links")
         .on_navigation(|webview, url| match url.scheme() {
-            "http" | "https" if url.host_str() == Some(MAILTO_LINK_HOST) => {
+            "http" | "https" if matches!(url.host_str(), Some(MAILTO_LINK_HOST | CHECK_LINK_HOST)) => {
                 let _ = webview.emit("open-link", url.query().unwrap_or_default());
                 false
             }
@@ -1667,6 +1804,20 @@ async fn empty_folder(kind: String, state: State<'_, AppState>) -> CmdResult<u32
 struct ColumnSpec {
     name: String,
     folder: String,
+}
+
+/// The real name of a folder on the server, created when it does not exist
+/// ("Done archive" may become "INBOX.Done archive"); "" = the Archive folder.
+#[tauri::command]
+async fn ensure_folder(name: String, state: State<'_, AppState>) -> CmdResult<String> {
+    let mut inner = state.inner.lock().await;
+    let name = name.trim().to_string();
+    with_retry!(inner, |s, _caps| async {
+        if name.is_empty() {
+            return imap::special_folder(s, "archive").await;
+        }
+        Ok(imap::resolve_folders(s, std::slice::from_ref(&name)).await?.remove(0))
+    })
 }
 
 /// Saves the board columns edited in the settings (the board is then reopened).
@@ -1745,6 +1896,9 @@ fn main() {
             open_board,
             load_column,
             move_card,
+            move_cards,
+            ensure_folder,
+            file_cards,
             set_pin,
             read_message,
             set_seen,
@@ -1773,6 +1927,11 @@ fn main() {
             cached_all_mail,
             local_thread,
             search_local,
+            list_tasks,
+            link_task,
+            unlink_task,
+            rename_task,
+            task_emails,
             cache_stats,
             clear_cache,
             flush_queue,

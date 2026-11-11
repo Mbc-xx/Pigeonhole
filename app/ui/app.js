@@ -8,19 +8,25 @@ const $ = (id) => document.getElementById(id);
 // Part of the error of a browser sign-in that stopped working (see oauth.rs).
 const SIGN_IN_AGAIN = "Sign in again";
 const SERVER_READS = new Set(["open_board", "load_column", "list_folders", "folder_unseen", "load_all_mail", "search_emails", "flush_queue"]);
+// The backend's answer to something it gave up because the account changed.
+const LEFT_ACCOUNT = "left this account";
 let serverBusy = 0;
 function invoke(cmd, args) {
   const call = tauriInvoke(cmd, args).catch((e) => {
+    // Nobody is waiting for it any more: the interface is starting again.
+    if (String(e) === LEFT_ACCOUNT) return new Promise(() => {});
     if (String(e).includes(SIGN_IN_AGAIN)) askToSignInAgain(String(e));
     throw e;
   });
   if (!SERVER_READS.has(cmd)) return call;
   serverBusy++;
   setSyncStatus();
-  return call.finally(() => {
+  const done = () => {
     serverBusy--;
     setSyncStatus();
-  });
+  };
+  call.then(done, done);
+  return call;
 }
 
 const state = {
@@ -306,8 +312,7 @@ function offerUndo(message, moves) {
         }
       }
       toast(failed ? `${failed} of ${undoable.length} could not be restored` : "Restored", failed ? "error" : "info");
-      await Promise.all(visibleColumns().map((c) => loadColumn(c.folder)));
-      scheduleFolderCounts();
+      await afterBulkChange(undoable.flatMap((m) => [m.now, m.back]));
     },
   }, seconds);
 }
@@ -1088,6 +1093,11 @@ function applySettingsState(settings) {
   applyAppearance(state.appearance);
   state.waitingSetting = settings.waiting_folder || "";
   state.waitingDays = settings.waiting_days ?? 3;
+  state.todoSetting = settings.todo_folder || "";
+  state.todoDays = settings.todo_days ?? 5;
+  state.doneSetting = settings.done_folder || "";
+  state.doneDays = settings.done_days ?? 0;
+  state.doneTarget = settings.done_target || "";
   updateBadge();
 }
 
@@ -1123,6 +1133,7 @@ async function openBoard({ fromCache = false, retry = false } = {}) {
     show("board-screen");
     loadFolders();
     loadKnownSenders();
+    invoke("list_tasks").then(setTasks, () => setTasks([]));
     await Promise.all(state.columns.map((c) => loadColumn(c.folder)));
     checkOtherAccounts();
     // Rules and notifications also work when the Inbox is not a board column.
@@ -1178,6 +1189,12 @@ function renderColumns() {
       markRead.hidden = true; // shown when the column has unread emails
       markRead.addEventListener("click", () => markAllRead(col.folder));
       head.append(markRead);
+    }
+    if (state.view?.task) {
+      const open = el("button", "head-btn", "Open task");
+      open.title = state.view.task.url;
+      open.addEventListener("click", () => openLink(state.view.task.url));
+      head.append(open);
     }
     const emptyKind = folderKind(col.folder);
     if (state.view && (emptyKind === "trash" || emptyKind === "junk")) {
@@ -1333,6 +1350,7 @@ function columnEl(folder) {
 async function loadColumn(folder) {
   if (folder === SEARCH_KEY) return runSearch();
   if (folder === ALL_KEY) return loadAllMail();
+  if (folder === TASK_KEY) return loadTask();
   // What is already known (in memory or on this Mac) is shown at once, then
   // refreshed from the server.
   if (state.cards[folder]?.length) {
@@ -1475,9 +1493,27 @@ function renderCards(folder) {
   updateFilterCounts();
   const all = state.cards[folder] || [];
   state.waitingCtx = folder === waiting ? waitingContext(all) : null;
+  // The board only: a column's age means nothing in a folder list.
+  const todo = !state.view && state.todoDays > 0 && folder === todoFolder();
+  state.todoCtx = todo ? columnSince(folder, all, true) : null;
+  if (!state.view && folder === doneFolder()) {
+    columnSince(folder, all, false);
+    if (state.fresh.has(folder)) setTimeout(sweepDone);
+  }
   const unread = all.filter((c) => !c.seen).length;
   column.querySelector(".count").textContent = all.length;
   column.querySelector(".unread").textContent = unread ? `${unread} unread` : "";
+  const late = todo ? all.filter((c) => daysInColumn(state.todoCtx, [{ card: c }]) >= state.todoDays).length : 0;
+  let lateBadge = column.querySelector(".late-count");
+  if (late && !lateBadge) {
+    lateBadge = el("span", "late-count");
+    column.querySelector(".unread").after(lateBadge);
+  }
+  if (lateBadge) {
+    lateBadge.hidden = !late;
+    lateBadge.textContent = `${late} late`;
+    lateBadge.title = `${late} email${late === 1 ? "" : "s"} in this column for ${state.todoDays} days or more`;
+  }
   const markRead = column.querySelector(".head-btn.icon-btn");
   if (markRead) markRead.hidden = !unread;
   // Unread only / Important only are board filters: search results show everything found.
@@ -1552,18 +1588,91 @@ function renderCards(folder) {
 // ---------- waiting for an answer ----------
 
 /// The board column of emails waiting for an answer (null when there is none).
-function waitingFolder() {
-  const choice = state.waitingSetting || "";
+/// The board column chosen in the settings for a role ("" = found by its name).
+function roleColumn(choice, names) {
   if (choice === "none") return null;
   if (choice && state.columns?.some((c) => c.folder === choice)) return choice;
-  return state.columns?.find((c) => /^(waiting|attesa|in attesa)$/i.test(c.name.trim()))?.folder || null;
+  return state.columns?.find((c) => names.test(c.name.trim()))?.folder || null;
 }
 
-function renderWaitingChoices(current) {
-  const select = $("set-waiting");
-  select.replaceChildren(new Option("Automatic (the column named “Waiting”)", ""), new Option("None", "none"));
+const WAITING_NAMES = /^(waiting|attesa|in attesa)$/i;
+const TODO_NAMES = /^(to ?do|da fare|todo)$/i;
+const DONE_NAMES = /^(done|fatto|fatti|finished|completed|completat[oie])$/i;
+
+const waitingFolder = () => roleColumn(state.waitingSetting || "", WAITING_NAMES);
+const todoFolder = () => roleColumn(state.todoSetting || "", TODO_NAMES);
+const doneFolder = () => roleColumn(state.doneSetting || "", DONE_NAMES);
+
+function renderColumnChoice(id, current, name) {
+  const select = $(id);
+  select.replaceChildren(new Option(`Automatic (the column named “${name}”)`, ""), new Option("None", "none"));
   for (const c of state.columns || []) select.append(new Option(c.name, c.folder));
   select.value = [...select.options].some((o) => o.value === current) ? current : "";
+}
+
+const renderWaitingChoices = (current) => renderColumnChoice("set-waiting", current, "Waiting");
+
+// ---------- how long emails have been in a column ----------
+
+/// When each email of a column arrived there, as first seen by the app
+/// (Message-ID -> seconds), kept per account and column. Emails already there
+/// the first time count from their own date when `fromDate`, else from now.
+function columnSince(folder, cards, fromDate) {
+  const key = `since:${state.accountId}:${folder}`;
+  let since = null;
+  try {
+    since = JSON.parse(local.get(key) || "null");
+  } catch (_) {}
+  const firstTime = !since;
+  since = since || {};
+  const now = Math.floor(Date.now() / 1000);
+  const present = {};
+  for (const card of cards) {
+    const id = mailId(card.message_id);
+    if (id) present[id] = since[id] ?? (firstTime && fromDate ? card.date : now);
+  }
+  if (cards.length || !firstTime) local.set(key, JSON.stringify(present));
+  return { since: present, now };
+}
+
+/// Whole days an email (or conversation) has been in its column.
+function daysInColumn(ctx, members) {
+  const entered = Math.min(...members.map((m) => ctx.since[mailId(m.card.message_id)] ?? ctx.now));
+  return Math.floor((ctx.now - entered) / 86400);
+}
+
+/// "Todo · 6 days" on an email that has waited too long in the to-do column.
+function todoTag(members) {
+  const ctx = state.todoCtx;
+  if (!ctx) return null;
+  const days = daysInColumn(ctx, members);
+  if (days < state.todoDays) return null;
+  const tag = el("span", "wait-tag " + (days >= 2 * state.todoDays ? "overdue" : "late"), `To do · ${days} days`);
+  tag.title = `In this column for ${days} days`;
+  return tag;
+}
+
+/// Finished emails older than the chosen time leave the done column, at most
+/// once an hour, with Undo. Pinned and unread emails stay.
+let doneSweptAt = 0;
+async function sweepDone() {
+  const done = doneFolder();
+  if (!done || !(state.doneDays > 0) || !state.fresh.has(done) || Date.now() - doneSweptAt < 3600_000) return;
+  doneSweptAt = Date.now();
+  const cards = state.cards[done] || [];
+  const ctx = columnSince(done, cards, false);
+  const old = cards.filter((card) => !card.flagged && card.seen && card.message_id && ctx.now - (ctx.since[mailId(card.message_id)] ?? ctx.now) >= state.doneDays * 86400);
+  if (!old.length) return;
+  let target;
+  try {
+    target = await invoke("ensure_folder", { name: state.doneTarget });
+  } catch (e) {
+    return toast("Could not move the finished emails: " + e);
+  }
+  if (target === done) return;
+  const moves = await moveEmails(old.map((card) => ({ folder: done, card })), { to: target, quiet: true });
+  const n = moves.filter((m) => m.now).length;
+  if (n) offerUndo(`${n === 1 ? "1 email" : n + " emails"} done for over ${state.doneDays} days moved to ${folderLabel(target)}`, moves);
 }
 
 let waitingRenderTimer;
@@ -1926,14 +2035,21 @@ function renderCard(folder, card, group = null, { child = false } = {}) {
     }
     const tags = waitingTags(members);
     if (tags) date.prepend(tags);
+    date.prepend(...taskTags(members));
+    const todoLate = todoTag(members);
+    if (todoLate) date.prepend(todoLate);
     c.append(from, main, date, actions);
     // Preview below, from under the sender to under the subject.
     if (card.preview && !child) c.append(el("div", "row-preview", card.preview));
     if (readerCard && readerCard.folder === folder && readerCard.card.uid === card.uid) c.classList.add("selected");
   } else {
     c.append(actions, fromLine, el("div", "subject", card.subject || "(no subject)"), el("div", "preview", card.preview));
-    const tags = waitingTags(members);
-    if (tags) c.append(tags);
+    const extra = [todoTag(members), ...taskTags(members)].filter(Boolean);
+    const tags = waitingTags(members) || (extra.length ? el("div", "wait-tags") : null);
+    if (tags) {
+      tags.append(...extra);
+      c.append(tags);
+    }
   }
 
   if (members.every((m) => state.selection.has(selKey(m.folder, m.card)))) c.classList.add("multi-selected");
@@ -2034,6 +2150,7 @@ function openCardMenu(c, x, y) {
         ? menuButton("inbox", "Not spam" + count, run((l) => moveMany(l, "INBOX")))
         : menuButton("junk", "Spam" + count, run((l) => fileMany(l, "junk", { conversation: !batch }))),
       menuButton("folder", "Move to…" + count, () => fillFolders(menu)),
+      menuButton("link", "Link to a task…" + count, () => fillTasks(menu)),
     );
     sep();
     if (batch) menu.append(menuButton("close", "Clear the selection", run(() => clearSelection())));
@@ -2058,6 +2175,12 @@ function openCardMenu(c, x, y) {
     const here = new Set(targets().map((m) => m.folder));
     const head = [menuButton("back", "Back", () => fill(menu)), el("div", "menu-sep")];
     fillMoveList(menu, head, here.size === 1 ? [...here][0] : null, (to) => run((l) => moveMany(l, to, { conversation: !batch }))());
+  };
+
+  // "Link to a task…": paste its link or pick one already in use.
+  const fillTasks = (menu) => {
+    const head = [menuButton("back", "Back", () => fill(menu)), el("div", "menu-sep")];
+    fillTaskPicker(menu, head, targets(), run(() => {}));
   };
 
   popMenuAt(x, y, fill).classList.add("card-menu");
@@ -2098,8 +2221,12 @@ function dropFromLists(members) {
   for (const c of visibleColumns()) renderCards(c.folder);
 }
 
-async function afterBulkChange() {
-  await Promise.all(visibleColumns().map((c) => loadColumn(c.folder)));
+/// Reads again what a change touched: the given folders, or every list on
+/// screen when they are not known. Lists made of several folders always are.
+async function afterBulkChange(folders = null) {
+  const touched = folders && new Set(folders);
+  const columns = visibleColumns().filter((c) => !touched || touched.has(c.folder) || MULTI_KEYS.includes(c.folder));
+  await Promise.all(columns.map((c) => loadColumn(c.folder)));
   scheduleFolderCounts();
 }
 
@@ -2119,15 +2246,20 @@ async function moveEmails(members, { to = "", kind = "", quiet = false, conversa
   const moves = [];
   let failed = 0;
   let error = "";
+  // One request per folder, however many emails: each one costs a round trip.
+  const groups = new Map();
   for (const m of members) {
     if (kind && folderKind(m.folder) === kind) continue; // already there
+    if (!groups.has(m.folder)) groups.set(m.folder, []);
+    groups.get(m.folder).push(m);
+  }
+  for (const [folder, list] of groups) {
+    const uids = list.map((m) => m.card.uid);
     try {
-      const now = kind
-        ? await invoke("file_card", { folder: m.folder, uid: m.card.uid, kind })
-        : (await invoke("move_card", { from: m.folder, uid: m.card.uid, to })) ? to : "";
-      moves.push({ message_id: m.card.message_id, now, back: m.folder });
+      const now = kind ? await invoke("file_cards", { folder, uids, kind }) : (await invoke("move_cards", { from: folder, uids, to })) ? to : "";
+      for (const m of list) moves.push({ message_id: m.card.message_id, now, back: m.folder });
     } catch (e) {
-      failed++;
+      failed += list.length;
       error = String(e);
       console.error(e);
     }
@@ -2137,7 +2269,7 @@ async function moveEmails(members, { to = "", kind = "", quiet = false, conversa
   if (failed) toast(`${failed} of ${members.length} emails could not be moved: ${error}`);
   else if (moves.some((m) => !m.now)) toast(`No connection: ${what.toLowerCase()} will be moved to ${where} when the server can be reached`, "info");
   else if (!quiet) offerUndo(`${what} moved to ${where}`, moves);
-  await afterBulkChange();
+  await afterBulkChange([...groups.keys(), target, ...moves.map((m) => m.now)]);
   return moves;
 }
 
@@ -2158,7 +2290,7 @@ async function pinMany(members, pinned, cardEl) {
       toast("Pin not changed: " + e);
     }
   }
-  await afterBulkChange();
+  await afterBulkChange(members.map((m) => m.folder));
   cardEl.classList.remove("busy");
 }
 
@@ -2212,12 +2344,31 @@ $("only-important").addEventListener("click", (ev) => {
 
 const KNOWN_REFRESH_MS = 30 * 60 * 1000;
 
+// Reading them means going through the sent emails on a connection of its
+// own: the list kept from last time is used at once, and read again only
+// when it is old.
+const KNOWN_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+function rememberKnownSenders(at = cacheGet("known")?.at || 0) {
+  cacheSet("known", { at, list: [...state.known] });
+}
+
 async function loadKnownSenders() {
-  try {
-    state.known = new Set(await invoke("known_senders"));
+  const saved = cacheGet("known");
+  const show = () => {
     updateBadge();
     for (const c of visibleColumns()) renderCards(c.folder);
     if (readerCard) updateSenderPanel();
+  };
+  if (saved?.list?.length && !state.known.size) {
+    state.known = new Set(saved.list);
+    show();
+  }
+  if (saved && Date.now() - saved.at < KNOWN_MAX_AGE_MS) return;
+  try {
+    state.known = new Set(await invoke("known_senders"));
+    rememberKnownSenders(Date.now());
+    show();
   } catch (e) {
     console.error("could not read sent emails", e);
   }
@@ -2502,6 +2653,7 @@ function renderFolders() {
     nav.append(item);
   }
   $("nav-board").classList.toggle("active", !state.view);
+  renderTaskList();
 }
 
 function setupFolderDrop(item, folder) {
@@ -2520,11 +2672,252 @@ function setupFolderDrop(item, folder) {
   });
 }
 
+// ---------- tasks (Jira and the like) linked to emails ----------
+
+state.tasks = []; // [{ url, name, emails }], most recently linked first
+let taskIndex = new Map(); // Message-ID -> the tasks linked to that email
+
+const mailId = (id) => (id || "").replace(/^<|>$/g, "").trim().toLowerCase();
+
+/// The tasks as the backend now has them: everything showing them follows.
+function setTasks(tasks) {
+  state.tasks = tasks || [];
+  taskIndex = new Map();
+  for (const t of state.tasks) {
+    for (const id of t.emails) taskIndex.set(id, [...(taskIndex.get(id) || []), t]);
+  }
+  renderTaskList();
+  renderReaderTasks();
+  const open = state.view?.task;
+  if (!open) {
+    for (const c of visibleColumns()) renderCards(c.folder);
+    return;
+  }
+  // The task on screen: its emails changed, it was renamed or it is gone.
+  const now = state.tasks.find((t) => t.url === open.url);
+  if (!now) return showBoard();
+  state.view.task = now;
+  if (state.view.label !== now.name) {
+    state.view.label = now.name;
+    renderColumns();
+  }
+  loadTask();
+}
+
+/// The Message-IDs an email answers to, and its own: a link on any of them
+/// makes it part of the task, so replies follow their conversation.
+const cardIds = (card) => [card.message_id, ...(card.thread_refs || [])].map(mailId).filter(Boolean);
+
+function tasksOf(members) {
+  if (!taskIndex.size) return [];
+  const found = new Set();
+  for (const { card } of members) {
+    for (const id of cardIds(card)) for (const t of taskIndex.get(id) || []) found.add(t);
+  }
+  return [...found];
+}
+
+/// The tasks of an email or conversation as small buttons (two at most). The
+/// list of a task's emails leaves that task out: every row would repeat it.
+function taskTags(members, all = false) {
+  const tasks = tasksOf(members).filter((t) => all || t.url !== state.view?.task?.url);
+  return tasks.slice(0, 2).map((task) => {
+    const tag = el("button", "task-tag");
+    tag.type = "button";
+    tag.draggable = false;
+    tag.title = `Task ${task.name}\n${task.url}`;
+    tag.append(icon("link"), el("span", "", task.name));
+    tag.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      popMenu(tag, (menu) => fillTaskMenu(menu, task, members));
+    });
+    return tag;
+  });
+}
+
+function renderReaderTasks() {
+  const tags = readerCard ? taskTags([readerCard], true) : [];
+  $("reader-tasks").replaceChildren(...tags);
+  $("reader-tasks").hidden = !tags.length;
+}
+
+async function changeTasks(command, args, done = "") {
+  try {
+    setTasks(await invoke(command, args));
+    if (done) toast(done, "info");
+    return true;
+  } catch (e) {
+    toast("Could not update the task: " + e);
+    return false;
+  }
+}
+
+function linkTask(url, members) {
+  const ids = [...new Set(members.map((m) => mailId(m.card.message_id)).filter(Boolean))];
+  if (!ids.length) return toast("This email has no Message-ID: it cannot be linked to a task.");
+  return changeTasks("link_task", { url: url.trim(), ids }).then((ok) => ok && toast(`Linked to ${state.tasks[0].name}`, "info"));
+}
+
+/// What can be done with a task; with `members`, also taking them off it.
+function fillTaskMenu(menu, task, members = null) {
+  menu.classList.add("task-menu");
+  const run = (fn) => () => {
+    closeConvMenu();
+    fn();
+  };
+  menu.replaceChildren(menuButton("link", `Open ${task.name} in the browser`, run(() => openLink(task.url))));
+  if (state.view?.task?.url !== task.url) menu.append(menuButton("search", "Show the emails of this task", run(() => openTask(task))));
+  if (members) {
+    const ids = [...new Set(members.flatMap((m) => cardIds(m.card)))];
+    const what = members.length > 1 ? "conversation" : "email";
+    menu.append(menuButton("close", `Unlink this ${what}`, run(() => changeTasks("unlink_task", { url: task.url, ids }, `Unlinked from ${task.name}`))));
+  }
+  menu.append(
+    el("div", "menu-sep"),
+    menuButton("compose", "Rename…", () => {
+      const input = menuInput("Name of the task", task.name, (name) => {
+        closeConvMenu();
+        changeTasks("rename_task", { url: task.url, name });
+      });
+      menu.replaceChildren(input);
+      input.select();
+    }),
+    menuButton("trash", "Remove the task and its links", run(() => removeTask(task))),
+  );
+}
+
+async function removeTask(task) {
+  if (!(await changeTasks("unlink_task", { url: task.url, ids: null }))) return;
+  toast(`Task ${task.name} removed`, "info", {
+    label: "Undo",
+    run: async () => (await changeTasks("link_task", { url: task.url, ids: task.emails })) && changeTasks("rename_task", { url: task.url, name: task.name }),
+  });
+}
+
+/// A text field inside a menu; Enter hands over what was typed.
+function menuInput(placeholder, value, done) {
+  const input = el("input", "menu-input");
+  input.placeholder = placeholder;
+  input.value = value;
+  input.spellcheck = false;
+  input.autocomplete = "off";
+  input.addEventListener("click", (ev) => ev.stopPropagation());
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && input.value.trim()) done(input.value.trim());
+    else if (ev.key === "Escape") closeConvMenu();
+    else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  setTimeout(() => input.focus());
+  return input;
+}
+
+/// Fills `menu` with the ways to link `members` to a task: pasting its link
+/// (which links at once) or picking a task already in use. `close` runs first.
+function fillTaskPicker(menu, head, members, close) {
+  menu.classList.add("task-menu");
+  const pick = (url) => {
+    close();
+    linkTask(url, members);
+  };
+  const input = menuInput("Paste the link of the task", "", pick);
+  input.addEventListener("paste", () => setTimeout(() => /^https?:\/\/\S+$/i.test(input.value.trim()) && pick(input.value)));
+  menu.replaceChildren(...head, input);
+  const linked = new Set(tasksOf(members));
+  const others = state.tasks.filter((t) => !linked.has(t)).slice(0, 12);
+  if (others.length) menu.append(el("div", "menu-head", "Tasks in use"));
+  for (const t of others) {
+    const b = menuButton("link", t.name, () => pick(t.url));
+    b.title = t.url;
+    menu.append(b);
+  }
+}
+
+/// The tasks in the sidebar: a click lists their emails, a card dropped on
+/// one is linked to it.
+function renderTaskList() {
+  // Tasks pile up: they get a tab of their own beside the folders, with a
+  // field to find one. Without tasks the sidebar is the folders, as ever.
+  const has = state.tasks.length > 0;
+  const tab = has && local.get("sideTab") === "tasks" ? "tasks" : "folders";
+  $("side-tabs").hidden = !has;
+  $("folders-title").hidden = has;
+  $("folder-list").hidden = tab !== "folders";
+  $("task-pane").hidden = tab !== "tasks";
+  for (const b of $("side-tabs").children) b.classList.toggle("active", b.dataset.side === tab);
+  $("side-tabs").querySelector("[data-side='tasks']").textContent = `Tasks ${state.tasks.length || ""}`.trim();
+  if (tab !== "tasks") return $("task-list").replaceChildren();
+  const words = $("task-filter").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = state.tasks.filter((t) => words.every((w) => (t.name + " " + t.url).toLowerCase().includes(w)));
+  if (!shown.length) return $("task-list").replaceChildren(el("div", "nav-empty muted small", "No task found"));
+  $("task-list").replaceChildren(
+    ...shown.map((task) => {
+      const item = el("button", "nav-item");
+      item.title = `${task.emails.length} linked · ${task.url}`;
+      if (state.view?.task?.url === task.url) item.classList.add("active");
+      item.append(icon("link"), el("span", "label", task.name), el("span", "badge", String(task.emails.length)));
+      item.addEventListener("click", () => openTask(task));
+      item.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        popMenuAt(ev.clientX, ev.clientY, (menu) => fillTaskMenu(menu, task));
+      });
+      item.addEventListener("dragover", (ev) => {
+        if (!state.dragging) return;
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "move";
+        item.classList.add("drop-target");
+      });
+      item.addEventListener("dragleave", () => item.classList.remove("drop-target"));
+      item.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        item.classList.remove("drop-target");
+        if (state.dragging) linkTask(task.url, state.dragging.members);
+      });
+      return item;
+    }),
+  );
+}
+
+for (const b of $("side-tabs").children) {
+  b.addEventListener("click", () => {
+    local.set("sideTab", b.dataset.side);
+    renderTaskList();
+    if (b.dataset.side === "tasks") $("task-filter").focus();
+  });
+}
+$("task-filter").addEventListener("input", renderTaskList);
+$("task-filter").addEventListener("keydown", (ev) => {
+  // Enter opens the first task found.
+  if (ev.key === "Enter") $("task-list").querySelector(".nav-item")?.click();
+});
+
+function openTask(task) {
+  local.set("sideTab", "tasks");
+  state.view = { folder: TASK_KEY, label: task.name, task, multi: true };
+  state.cards[TASK_KEY] = [];
+  renderColumns();
+  renderFolders();
+  loadTask();
+}
+
+/// The emails of the task on screen, from the copy on this computer: the
+/// linked ones with the rest of their conversations, newest first.
+async function loadTask() {
+  const view = state.view;
+  if (!view?.task) return;
+  const entries = await invoke("task_emails", { ids: view.task.emails }).catch(() => []);
+  if (state.view !== view) return;
+  state.cards[TASK_KEY] = entries.sort((a, b) => b.card.date - a.card.date).map((e) => ({ ...e.card, __folder: e.folder }));
+  renderCards(TASK_KEY);
+}
+
 // ---------- search ----------
 
 const SEARCH_KEY = "__search__";
 const ALL_KEY = "__all__";
-const MULTI_KEYS = [SEARCH_KEY, ALL_KEY]; // lists with emails from several folders
+const TASK_KEY = "__task__";
+const MULTI_KEYS = [SEARCH_KEY, ALL_KEY, TASK_KEY]; // lists with emails from several folders
 state.filter = null; // the search box as a filter of the loaded cards
 let searchSeq = 0; // ignores results of searches that were replaced by a newer one
 
@@ -2750,7 +3143,13 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
-listen("open-link", (ev) => openLink(decodeURIComponent(ev.payload)));
+listen("open-link", (ev) => {
+  const link = decodeURIComponent(ev.payload);
+  if (!link.startsWith("{")) return openLink(link);
+  try {
+    openCheckedLink(JSON.parse(link));
+  } catch (_) {}
+});
 
 listen("folder-changed", (ev) => {
   if (String(ev.payload).toUpperCase() === "INBOX" && !columnEl(ev.payload)) checkInbox();
@@ -2929,6 +3328,12 @@ $("reader-move").addEventListener("click", (ev) => {
   });
 });
 
+$("reader-task").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  if (document.querySelector(".conv-menu.task-menu")) return closeConvMenu();
+  popMenu($("reader-task"), (menu) => fillTaskPicker(menu, [], [readerCard], closeConvMenu));
+});
+
 /// The reader is a single element: inside the popup on the board, inside the
 /// right-hand pane in the folder view.
 function placeReader() {
@@ -2992,6 +3397,7 @@ async function openReader(folder, card, opts = {}) {
   $("rule-scope").value = "address";
   updateSenderPanel();
   $("reader-subject").textContent = card.subject || "(no subject)";
+  renderReaderTasks();
   $("reader-from").textContent = card.from || "(unknown sender)";
   $("reader-from-address").textContent = card.from_address && card.from_address !== card.from ? card.from_address : "";
   setAvatar($("reader-avatar"), card.from || card.from_address || "?");
@@ -3460,11 +3866,59 @@ function fitFrame(frame) {
   for (const img of doc.images) img.addEventListener("load", fit);
   // A click on a link is handled by the app itself (external_links in main.rs).
   for (const a of doc.querySelectorAll("a[href]")) {
-    const href = a.getAttribute("href").trim();
+    let href = a.getAttribute("href").trim();
+    if (/^www\./i.test(href)) href = "https://" + href;
     a.title = href;
     if (/^mailto:/i.test(href)) a.href = "https://mailto.invalid/?" + encodeURIComponent(href);
-    else if (/^www\./i.test(href)) a.href = "https://" + href;
+    else if (linkWarning(a.textContent, href)) {
+      // Opened only after a question (external_links in main.rs sends it back here).
+      a.href = "https://link-check.invalid/?" + encodeURIComponent(JSON.stringify({ url: href, shown: a.textContent.trim() }));
+    } else a.href = href;
   }
+}
+
+/// The site a web address leads to, without "www.", or "" when it is not one.
+function siteOf(address) {
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(address) ? address : "https://" + address);
+    return /^https?:$/.test(u.protocol) ? u.hostname.toLowerCase().replace(/^www\./, "") : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+/// Why a link of an email may not go where it seems to, or "" when it looks
+/// fine: its text names another site (the classic phishing trick), the
+/// address hides its real site behind a name and an "@", or the site is
+/// written with look-alike letters from other alphabets.
+function linkWarning(text, href) {
+  let u;
+  try {
+    u = new URL(href);
+  } catch (_) {
+    return "";
+  }
+  if (!/^https?:$/.test(u.protocol)) return "";
+  const site = u.hostname.toLowerCase().replace(/^www\./, "");
+  if (u.username || u.password) return `The address hides where it leads: it goes to ${site}.`;
+  if (/(^|\.)xn--/.test(site)) return `The site name uses letters that look like others (${site}): it may imitate a known site.`;
+  // Only a text that is itself an address can lie about it: "Click here" cannot.
+  const shown = (text || "").trim().replace(/[.,;:)\]]+$/, "");
+  if (!/^(https?:\/\/)?(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(:\d+)?([/?#]\S*)?$/i.test(shown)) return "";
+  const claimed = siteOf(shown);
+  if (!claimed || claimed === site || site.endsWith("." + claimed) || claimed.endsWith("." + site)) return "";
+  return `The link shows ${claimed} but leads to ${site}.`;
+}
+
+/// A link of an email that may not go where it seems: says where it really
+/// leads and opens it only if asked to.
+async function openCheckedLink({ url, shown }) {
+  const why = linkWarning(shown, url);
+  const choice = await ask(`${why || "This link may not go where it seems."}\n\nFull address:\n${url}`, [
+    { label: "Cancel", value: null },
+    { label: "Open anyway", value: "open", kind: "danger" },
+  ]);
+  if (choice === "open") openLink(url);
 }
 
 function openLink(href) {
@@ -4356,6 +4810,7 @@ async function sendPending(pending) {
       const m = part.match(/<([^>]+)>/) || part.match(/(\S+@\S+)/);
       if (m) state.known.add(m[1].trim().toLowerCase());
     }
+    rememberKnownSenders();
     if (result.warning) toast(result.warning);
     else toast(`Email sent (copy saved to ${result.saved_to})`, "info");
     refreshSentForWaiting(true);
@@ -4458,6 +4913,12 @@ async function openSettings(lookOf = null) {
     $("set-ask-conv").checked = s.ask_conversation ?? true;
     renderWaitingChoices(s.waiting_folder || "");
     $("set-waiting-days").value = String(s.waiting_days ?? 3);
+    renderColumnChoice("set-todo", s.todo_folder || "", "Todo");
+    $("set-todo-days").value = String(s.todo_days ?? 5);
+    renderColumnChoice("set-done", s.done_folder || "", "Done");
+    $("set-done-days").value = String(s.done_days ?? 0);
+    $("set-done-target").value = s.done_target || "";
+    showDoneTarget();
     $("set-cache-mb").value = String(s.cache_max_mb ?? 1024);
     if (!$("set-cache-mb").value) $("set-cache-mb").value = "1024";
     $("set-prefetch").checked = s.prefetch ?? true;
@@ -4564,6 +5025,11 @@ $("settings-form").addEventListener("submit", async (ev) => {
         ...appearanceFromForm(),
         waiting_folder: $("set-waiting").value,
         waiting_days: parseInt($("set-waiting-days").value, 10),
+        todo_folder: $("set-todo").value,
+        todo_days: parseInt($("set-todo-days").value, 10),
+        done_folder: $("set-done").value,
+        done_days: parseInt($("set-done-days").value, 10),
+        done_target: $("set-done-target").value.trim(),
         cache_max_mb: parseInt($("set-cache-mb").value, 10),
         prefetch: $("set-prefetch").checked,
         ask_conversation: $("set-ask-conv").checked,
@@ -4598,6 +5064,11 @@ $("settings-form").addEventListener("submit", async (ev) => {
     toast("Settings not saved: " + e);
   }
 });
+
+function showDoneTarget() {
+  $("done-target-row").hidden = $("set-done-days").value === "0";
+}
+$("set-done-days").addEventListener("change", showDoneTarget);
 
 // ---------- export / import ----------
 
@@ -5393,16 +5864,17 @@ function renderChips(id) {
       removeRecipients(id, [r]);
     });
     chip.append(x);
-    // Click selects (⌘/Ctrl-click adds to the selection), double-click shows the address.
+    // Click selects (⌘/Ctrl-click adds to the selection; ⌘C then copies),
+    // double-click edits the name and the address.
     chip.addEventListener("click", (ev) => {
       ev.stopPropagation();
       if (!(ev.metaKey || ev.ctrlKey || ev.shiftKey)) clearChipSelection(chip);
       chip.classList.toggle("selected", ev.metaKey || ev.ctrlKey || ev.shiftKey ? !chip.classList.contains("selected") : true);
-      box.querySelector("input").focus();
+      input.focus();
     });
     chip.addEventListener("dblclick", (ev) => {
       ev.stopPropagation();
-      chip.classList.toggle("expanded");
+      editChip(id, chip, r);
     });
     chip.addEventListener("dragstart", (ev) => {
       if (!chip.classList.contains("selected")) {
@@ -5423,9 +5895,106 @@ function renderChips(id) {
       chipDrag = null;
       for (const b of document.querySelectorAll(".rcpt.drop-target")) b.classList.remove("drop-target");
     });
-    box.insertBefore(chip, box.querySelector("input"));
+    box.insertBefore(chip, input);
   });
 }
+
+/// Edits a recipient in place, as "Name <address>": typing a name before a
+/// bare address is enough to give it one. Enter or a click elsewhere keeps
+/// the change, Esc drops it; an emptied field removes the recipient.
+function editChip(id, chip, r) {
+  const field = el("input", "chip-edit");
+  field.value = r.name ? `${r.name} <${r.email}>` : r.email;
+  field.spellcheck = false;
+  field.autocomplete = "off";
+  const fit = () => (field.size = Math.max(12, field.value.length + 2));
+  fit();
+  let finished = false;
+  const done = (keep) => {
+    if (finished) return;
+    finished = true;
+    field.remove();
+    const list = compose.rcpt[id];
+    const at = list.indexOf(r);
+    if (keep && at >= 0) {
+      const others = new Set(list.filter((x) => x !== r).map((x) => x.email.toLowerCase()));
+      list.splice(at, 1, ...parseAddresses(field.value).filter((x) => x.email && !others.has(x.email.toLowerCase())));
+    }
+    renderChips(id);
+  };
+  field.addEventListener("input", fit);
+  field.addEventListener("blur", () => done(true));
+  field.addEventListener("mousedown", (ev) => ev.stopPropagation());
+  field.addEventListener("keydown", (ev) => {
+    ev.stopPropagation(); // the composer's own shortcuts stay out of this field
+    if (ev.key !== "Enter" && ev.key !== "Escape") return;
+    ev.preventDefault();
+    done(ev.key === "Enter");
+    $(id).focus();
+  });
+  clearChipSelection();
+  chip.replaceWith(field);
+  field.focus();
+  // Ready to type the name: before a bare address, or over the one there is.
+  field.setSelectionRange(0, r.name ? r.name.length : 0);
+}
+
+/// The selected recipients as text for the clipboard ("Name <address>, …"),
+/// unless some text is selected: then the usual copy is meant.
+function selectedChipsText() {
+  const chips = [...document.querySelectorAll("#compose-form .chip.selected")];
+  const field = document.activeElement;
+  const typing = field && typeof field.selectionStart === "number" && field.selectionStart !== field.selectionEnd;
+  if (!chips.length || typing || String(window.getSelection() || "")) return null;
+  return { chips, text: chips.map((c) => formatAddress(c._rcpt)).join(", ") };
+}
+
+/// Puts text on the clipboard: the modern way, else through a hidden field.
+function copyText(text) {
+  const byCommand = () => {
+    const back = document.activeElement;
+    const field = el("textarea");
+    field.value = text;
+    field.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.append(field);
+    field.select();
+    const ok = document.execCommand("copy");
+    field.remove();
+    back?.focus();
+    return ok ? Promise.resolve() : Promise.reject(new Error("copy refused"));
+  };
+  return navigator.clipboard?.writeText ? navigator.clipboard.writeText(text).catch(byCommand) : byCommand();
+}
+
+function removeSelectedChips(chips) {
+  for (const id of RCPT_FIELDS) {
+    const gone = chips.filter((c) => c.parentElement === $(id).parentElement).map((c) => c._rcpt);
+    if (gone.length) removeRecipients(id, gone);
+  }
+}
+
+// ⌘C / ⌘X on selected recipients. Both the key and the Edit menu's command
+// are answered, since the system may send only one of the two.
+for (const kind of ["copy", "cut"]) {
+  document.addEventListener(kind, (ev) => {
+    const sel = selectedChipsText();
+    if (!sel) return;
+    ev.preventDefault();
+    ev.clipboardData.setData("text/plain", sel.text);
+    toast(sel.chips.length > 1 ? `${sel.chips.length} addresses copied` : "Address copied", "info", null, 2);
+    if (kind === "cut") removeSelectedChips(sel.chips);
+  });
+}
+$("compose-form").addEventListener("keydown", (ev) => {
+  const key = ev.key.toLowerCase();
+  if (!(ev.metaKey || ev.ctrlKey) || ev.altKey || (key !== "c" && key !== "x")) return;
+  const sel = selectedChipsText();
+  if (!sel) return;
+  copyText(sel.text).then(() => {
+    toast(sel.chips.length > 1 ? `${sel.chips.length} addresses copied` : "Address copied", "info", null, 2);
+    if (key === "x") removeSelectedChips(sel.chips.filter((c) => c.isConnected));
+  }, () => {});
+});
 
 function removeRecipients(id, items) {
   compose.rcpt[id] = compose.rcpt[id].filter((r) => !items.includes(r));

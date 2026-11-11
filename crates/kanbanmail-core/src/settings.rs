@@ -74,6 +74,24 @@ pub struct Settings {
     /// Emails in the waiting column are flagged after this many days (0 = never).
     #[serde(default = "default_waiting_days")]
     pub waiting_days: u32,
+    /// The board column of emails still to do: "" = the column named "Todo"
+    /// (or "To do", "Da fare"), "none" = no such column.
+    #[serde(default)]
+    pub todo_folder: String,
+    /// Emails in the to-do column show how long they have been there after
+    /// this many days, in red after twice as many (0 = never).
+    #[serde(default = "default_todo_days")]
+    pub todo_days: u32,
+    /// The board column of finished emails: "" = the column named "Done".
+    #[serde(default)]
+    pub done_folder: String,
+    /// Finished emails are moved away after this many days (0 = never).
+    #[serde(default)]
+    pub done_days: u32,
+    /// Where finished emails go: "" = the Archive folder, otherwise the name
+    /// of a folder (created when missing).
+    #[serde(default)]
+    pub done_target: String,
     /// Most space the local copy of emails may take, in MB.
     #[serde(default = "default_cache_mb")]
     pub cache_max_mb: u32,
@@ -162,6 +180,10 @@ fn default_preview_list() -> u32 {
 
 fn default_waiting_days() -> u32 {
     3
+}
+
+fn default_todo_days() -> u32 {
+    5
 }
 
 fn default_undo_send() -> u32 {
@@ -255,6 +277,11 @@ impl Default for Settings {
             preview_list: default_preview_list(),
             waiting_folder: String::new(),
             waiting_days: default_waiting_days(),
+            todo_folder: String::new(),
+            todo_days: default_todo_days(),
+            done_folder: String::new(),
+            done_days: 0,
+            done_target: String::new(),
             cache_max_mb: default_cache_mb(),
             prefetch: true,
             compact_actions: true,
@@ -359,6 +386,14 @@ impl Settings {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn older_settings_get_the_column_defaults() {
+        let s: Settings = toml::from_str("theme = \"dark\"").unwrap();
+        assert_eq!((s.todo_folder.as_str(), s.todo_days), ("", 5));
+        assert_eq!((s.done_folder.as_str(), s.done_days, s.done_target.as_str()), ("", 0, ""));
+    }
+
     use super::*;
 
     fn sender(email: &str, server: &str) -> Sender {
