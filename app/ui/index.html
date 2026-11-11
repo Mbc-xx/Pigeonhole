@@ -397,6 +397,44 @@
             </label>
           </div>
           <p class="muted small">In this column, an email shows “Replied” when an answer in the same conversation has arrived (click it to open the answer), and how long it has been waiting once it passes the time above.</p>
+          <h3 class="settings-sub">Still to do</h3>
+          <div class="row-2 even">
+            <label>Column of emails to do
+              <select id="set-todo"></select>
+            </label>
+            <label>Show how long after
+              <select id="set-todo-days">
+                <option value="0">Never</option>
+                <option value="1">1 day</option>
+                <option value="2">2 days</option>
+                <option value="3">3 days</option>
+                <option value="5">5 days</option>
+                <option value="7">1 week</option>
+                <option value="14">2 weeks</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted small">An email in this column shows how many days it has been there once it passes the time above, in red after twice as long; the column title counts them. Pinned emails count too.</p>
+          <h3 class="settings-sub">Done</h3>
+          <div class="row-2 even">
+            <label>Column of finished emails
+              <select id="set-done"></select>
+            </label>
+            <label>Move them away after
+              <select id="set-done-days">
+                <option value="0">Never (keep them)</option>
+                <option value="3">3 days</option>
+                <option value="7">1 week</option>
+                <option value="14">2 weeks</option>
+                <option value="30">1 month</option>
+                <option value="90">3 months</option>
+              </select>
+            </label>
+          </div>
+          <label id="done-target-row">To the folder
+            <input id="set-done-target" list="folder-names" placeholder="Archive" autocomplete="off" spellcheck="false">
+          </label>
+          <p class="muted small">Leave the folder empty for Archive, or type a name (“Done archive”) to keep finished work apart: it is created if missing. Days count from when the email arrived in the column; pinned and unread emails stay. It happens while Pigeonhole is open, with Undo.</p>
           <datalist id="folder-names"></datalist>
         </section>
 

@@ -71,6 +71,14 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   to open the answer), and "Waiting N days" once it has waited longer than the
   chosen time (3 days by default). A reminder you send in the conversation
   (found in Sent) restarts the count, and only answers after it count.
+- To-do column: in the column named "Todo" (or another chosen in Settings →
+  Columns), an email shows "To do · N days" once it has been there longer than
+  the time chosen (5 days by default), in red after twice as long, and the
+  column title counts the late ones.
+- Done column: optionally, finished emails leave the "Done" column after a time
+  you choose (off by default), to Archive or to a folder of yours such as "Done
+  archive" (created if missing). Pinned and unread emails stay; it happens while
+  the app is open, with Undo.
 - Board columns are edited from the settings (add, rename, drag to reorder,
   remove; type a new folder name to create it).
 - "Load more" at the bottom of a column or folder for older emails.
@@ -407,8 +415,20 @@ background (it is closed when there is nothing left to download).
 ## Reading safely
 
 Email HTML is sanitized (no scripts, forms or links to external resources) and
-shown in an isolated frame that cannot load anything from the network: remote
-images (and tracking pixels) stay blocked.
+shown in an isolated frame that runs no scripts and cannot load anything from
+the network: remote images (and tracking pixels) stay blocked until you allow
+them for one email or in the settings.
+
+Before a link of an email opens, Pigeonhole checks where it really leads. It
+asks first when the text of the link names another site than its address
+("www.yourbank.com" leading somewhere else), when the address hides its site
+behind a name and an "@", or when the site name uses look-alike letters from
+other alphabets. Hovering a link shows its full address.
+
+Every connection (IMAP, SMTP, sign-in with Microsoft or Google) is encrypted
+and checks the server's certificate against the well-known authorities: an
+invalid or self-signed certificate is refused, never accepted to make things
+work.
 
 ## Command-line tool
 

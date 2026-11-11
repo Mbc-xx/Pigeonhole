@@ -1031,6 +1031,11 @@ async fn save_settings(settings: SettingsView, state: State<'_, AppState>) -> Cm
         preview_list: s.preview_list.min(2),
         waiting_folder: s.waiting_folder.trim().to_string(),
         waiting_days: s.waiting_days.min(365),
+        todo_folder: s.todo_folder.trim().to_string(),
+        todo_days: s.todo_days.min(365),
+        done_folder: s.done_folder.trim().to_string(),
+        done_days: s.done_days.min(3650),
+        done_target: s.done_target.trim().to_string(),
         cache_max_mb: s.cache_max_mb.clamp(100, 20_000),
         ..s
     };
@@ -1746,6 +1751,9 @@ fn open_in_browser(url: &str) -> CmdResult<()> {
 /// WebKit does not let the frame of an email leave for mailto: at all, so the
 /// interface rewrites those links to this reserved address.
 const MAILTO_LINK_HOST: &str = "mailto.invalid";
+/// Links whose text names another site than the one they lead to: the
+/// interface sends them here, to ask before opening them.
+const CHECK_LINK_HOST: &str = "link-check.invalid";
 
 /// Links clicked inside an email (an isolated frame) never navigate the app:
 /// web links open in the default browser, mailto links in a new email. The frame
@@ -1754,7 +1762,7 @@ const MAILTO_LINK_HOST: &str = "mailto.invalid";
 fn external_links<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("external-links")
         .on_navigation(|webview, url| match url.scheme() {
-            "http" | "https" if url.host_str() == Some(MAILTO_LINK_HOST) => {
+            "http" | "https" if matches!(url.host_str(), Some(MAILTO_LINK_HOST | CHECK_LINK_HOST)) => {
                 let _ = webview.emit("open-link", url.query().unwrap_or_default());
                 false
             }
@@ -1796,6 +1804,20 @@ async fn empty_folder(kind: String, state: State<'_, AppState>) -> CmdResult<u32
 struct ColumnSpec {
     name: String,
     folder: String,
+}
+
+/// The real name of a folder on the server, created when it does not exist
+/// ("Done archive" may become "INBOX.Done archive"); "" = the Archive folder.
+#[tauri::command]
+async fn ensure_folder(name: String, state: State<'_, AppState>) -> CmdResult<String> {
+    let mut inner = state.inner.lock().await;
+    let name = name.trim().to_string();
+    with_retry!(inner, |s, _caps| async {
+        if name.is_empty() {
+            return imap::special_folder(s, "archive").await;
+        }
+        Ok(imap::resolve_folders(s, std::slice::from_ref(&name)).await?.remove(0))
+    })
 }
 
 /// Saves the board columns edited in the settings (the board is then reopened).
@@ -1875,6 +1897,7 @@ fn main() {
             load_column,
             move_card,
             move_cards,
+            ensure_folder,
             file_cards,
             set_pin,
             read_message,

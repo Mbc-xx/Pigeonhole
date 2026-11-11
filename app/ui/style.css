@@ -376,6 +376,12 @@ button.primary:hover { background: var(--accent); filter: brightness(1.08); }
 .conv-menu .menu-input:focus { outline: none; border-color: var(--accent); }
 .wait-tag.replied { background: color-mix(in srgb, #1f9d55 18%, transparent); color: #1b8a4a; cursor: pointer; font-weight: 600; }
 .wait-tag.replied:hover { filter: brightness(0.95); }
+.wait-tag.overdue { background: color-mix(in srgb, #dc2626 18%, transparent); color: #c62828; font-weight: 600; }
+:root[data-theme="dark"] .wait-tag.overdue, :root[data-theme="ocean"] .wait-tag.overdue, :root[data-theme="forest"] .wait-tag.overdue, :root[data-theme="midnight"] .wait-tag.overdue, :root[data-custom-mode="dark"] .wait-tag.overdue { color: #f87171; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) .wait-tag.overdue { color: #f87171; } }
+.wait-tag.late { font-weight: 600; }
+.late-count { font-size: 11px; font-weight: 600; color: var(--pin); margin-left: 6px; }
+.late-count[hidden] { display: none; }
 .wait-tag.late { background: color-mix(in srgb, var(--pin) 18%, transparent); color: var(--pin); }
 :root[data-theme="dark"] .wait-tag.replied, :root[data-theme="ocean"] .wait-tag.replied, :root[data-theme="forest"] .wait-tag.replied, :root[data-theme="midnight"] .wait-tag.replied { color: #4ade80; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) .wait-tag.replied { color: #4ade80; } }
@@ -1189,3 +1195,5 @@ body.resizing { cursor: col-resize; user-select: none; }
   text-decoration: underline;
   cursor: pointer;
 }
+/* Questions can have several paragraphs (a link's full address, for one). */
+#dialog-message { white-space: pre-line; overflow-wrap: anywhere; }
