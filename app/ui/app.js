@@ -1503,7 +1503,10 @@ function renderCards(folder) {
   const unread = all.filter((c) => !c.seen).length;
   column.querySelector(".count").textContent = all.length;
   column.querySelector(".unread").textContent = unread ? `${unread} unread` : "";
-  const late = todo ? all.filter((c) => daysInColumn(state.todoCtx, [{ card: c }]) >= state.todoDays).length : 0;
+  // Late emails, or conversations when they are grouped: as the tags count them.
+  const mine = myAddresses();
+  const units = !todo ? [] : state.groupThreads ? groupByThread(all, folder).map((g) => g.members) : all.map((card) => [{ folder, card }]);
+  const late = units.filter((members) => daysInColumn(state.todoCtx, members, mine) >= state.todoDays).length;
   let lateBadge = column.querySelector(".late-count");
   if (late && !lateBadge) {
     lateBadge = el("span", "late-count");
@@ -1512,7 +1515,7 @@ function renderCards(folder) {
   if (lateBadge) {
     lateBadge.hidden = !late;
     lateBadge.textContent = `${late} late`;
-    lateBadge.title = `${late} email${late === 1 ? "" : "s"} in this column for ${state.todoDays} days or more`;
+    lateBadge.title = `${late} ${state.groupThreads ? "conversation" : "email"}${late === 1 ? "" : "s"} in this column for ${state.todoDays} days or more`;
   }
   const markRead = column.querySelector(".head-btn.icon-btn");
   if (markRead) markRead.hidden = !unread;
@@ -1635,9 +1638,21 @@ function columnSince(folder, cards, fromDate) {
   return { since: present, now };
 }
 
-/// Whole days an email (or conversation) has been in its column.
-function daysInColumn(ctx, members) {
-  const entered = Math.min(...members.map((m) => ctx.since[mailId(m.card.message_id)] ?? ctx.now));
+/// The addresses I write from: the account and its extra senders.
+function myAddresses() {
+  return new Set([state.email, ...(state.senders || []).map((x) => x.email)].map((a) => (a || "").trim().toLowerCase()).filter(Boolean));
+}
+
+/// Whole days an email (or conversation) has waited in its column. A
+/// conversation counts from its newest email written by someone else (my own
+/// replies do not make the work done), or from my newest when it has only
+/// mine. An email counts from when it showed up in the column, or from its
+/// date when it arrived while the app was closed.
+function daysInColumn(ctx, members, mine = myAddresses()) {
+  const at = (m) => ctx.since[mailId(m.card.message_id)] ?? ctx.now;
+  const start = Math.min(...members.map(at));
+  const theirs = members.filter((m) => !mine.has((m.card.from_address || "").toLowerCase()));
+  const entered = Math.max(...(theirs.length ? theirs : members).map((m) => Math.min(at(m), Math.max(m.card.date, start))));
   return Math.floor((ctx.now - entered) / 86400);
 }
 

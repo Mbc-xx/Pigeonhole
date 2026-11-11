@@ -74,7 +74,8 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - To-do column: in the column named "Todo" (or another chosen in Settings →
   Columns), an email shows "To do · N days" once it has been there longer than
   the time chosen (5 days by default), in red after twice as long, and the
-  column title counts the late ones.
+  column title counts the late ones. A conversation counts from its newest
+  email written by someone else: your own replies do not reset it.
 - Done column: optionally, finished emails leave the "Done" column after a time
   you choose (off by default), to Archive or to a folder of yours such as "Done
   archive" (created if missing). Pinned and unread emails stay; it happens while
