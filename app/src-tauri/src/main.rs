@@ -310,7 +310,7 @@ async fn finish_login(
         let shared = Settings::load().map_err(err)?;
         state.stop_account().await;
         account::begin_new(account.key()).map_err(err)?;
-        Settings::default().with_shared_from(&shared).save().map_err(err)?;
+        Settings::for_new_account(&shared).save().map_err(err)?;
     }
     account.save().map_err(err)?;
     save_secret(account.key()).map_err(err)?;

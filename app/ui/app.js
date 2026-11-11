@@ -423,6 +423,8 @@ function applyAppearance(a) {
   root.dataset.compactActions = String(a.compact_actions ?? true);
   root.dataset.mailSurface = a.mail_surface || "light";
   local.set("appearance", JSON.stringify(a));
+  // Each account's own look, ready for the next switch to it.
+  if (state?.accountId) local.set("appearance:" + state.accountId, JSON.stringify(a));
 }
 try {
   const a = JSON.parse(localStorage.getItem("appearance") || "null");
@@ -440,6 +442,7 @@ function appearanceFromForm() {
     preview_list: parseInt($("set-preview-list").value, 10),
     compact_actions: $("set-compact").checked,
     mail_surface: $("set-mail-surface").value,
+    theme_per_account: $("set-theme-per-account").checked,
   };
 }
 
@@ -596,6 +599,9 @@ async function switchAccount(id) {
   if (!canLeaveAccount()) return;
   for (const b of $("account-rail").children) b.classList.toggle("here", b.dataset.id === id);
   local.set("accountSwitched", "1");
+  // The next account's look from the first frame, when it has its own.
+  const look = local.get("appearance:" + id);
+  if (look && state.appearance?.theme_per_account) local.set("appearance", look);
   await invoke("switch_account", { id }).catch((e) => console.error(e));
   location.reload();
 }
@@ -1088,7 +1094,7 @@ function applySettingsState(settings) {
   state.notify = settings.notify || "important";
   state.undoSeconds = settings.undo_seconds ?? 8;
   state.undoSendSeconds = settings.undo_send_seconds ?? 10;
-  state.appearance = { theme: settings.theme, zoom: settings.zoom, preview_board: settings.preview_board, preview_list: settings.preview_list, compact_actions: settings.compact_actions, mail_surface: settings.mail_surface };
+  state.appearance = { theme: settings.theme, zoom: settings.zoom, preview_board: settings.preview_board, preview_list: settings.preview_list, compact_actions: settings.compact_actions, mail_surface: settings.mail_surface, theme_per_account: !!settings.theme_per_account };
   state.askConversation = settings.ask_conversation ?? true;
   applyAppearance(state.appearance);
   state.waitingSetting = settings.waiting_folder || "";
@@ -4925,6 +4931,9 @@ async function openSettings(lookOf = null) {
     $("set-preview-list").value = String(s.preview_list ?? 1);
     $("set-compact").checked = s.compact_actions ?? true;
     $("set-mail-surface").value = s.mail_surface || "light";
+    $("set-theme-per-account").checked = !!s.theme_per_account;
+    // Only meaningful with more than one account.
+    $("theme-per-account-row").hidden = $("theme-per-account-hint").hidden = !severalAccounts();
     $("set-ask-conv").checked = s.ask_conversation ?? true;
     renderWaitingChoices(s.waiting_folder || "");
     $("set-waiting-days").value = String(s.waiting_days ?? 3);
