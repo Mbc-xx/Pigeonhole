@@ -126,7 +126,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   opened the email): load them per email with "Load images", or always from
   the settings. Inline images embedded in the email are always shown.
 - Attachments listed in the reader with their size; click one to save it to
-  the folder you choose (Settings → Reading: ask every time, Downloads or a folder of yours). Cards with attachments
+  the folder you choose (Settings → Reading: ask every time, Downloads or a folder of yours), then "Show in Finder" opens its folder; or drag it straight to a folder, the desktop or another app. Cards with attachments
   show a paperclip.
 - Sidebar with "New email", the "Important only" and "Unread only" filters (as
   icons with their counts) and every folder (Trash, Sent, Junk, subfolders…)

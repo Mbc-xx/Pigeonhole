@@ -1168,6 +1168,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .toast.wide { padding: 12px 18px; font-weight: 600; }
 .toast button { background: rgba(255, 255, 255, 0.18); color: #fff; border-color: rgba(255, 255, 255, 0.5); font-weight: 600; padding: 3px 10px; }
 .toast button:hover { background: rgba(255, 255, 255, 0.3); border-color: #fff; }
+/* The one thing to do next, in the toast's own color turned around. */
+.toast button.toast-primary { background: #fff; color: var(--accent); border-color: #fff; }
+.toast button.toast-primary:hover { background: rgba(255, 255, 255, 0.88); }
 .toast .toast-close { padding: 2px; margin-right: -6px; border: 0; background: none; }
 .toast .toast-close .icon { width: 14px; height: 14px; }
 
@@ -1197,3 +1200,5 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 /* Questions can have several paragraphs (a link's full address, for one). */
 #dialog-message { white-space: pre-line; overflow-wrap: anywhere; }
+/* An attachment being dragged out to a folder. */
+.attachment.dragging-out { opacity: 0.55; }

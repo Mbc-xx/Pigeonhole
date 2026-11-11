@@ -79,9 +79,11 @@ let toastTimer;
 function toast(message, kind = "error", action = null, seconds = null) {
   const el = $("toast");
   el.replaceChildren(el_text(message));
+  el.title = "";
   if (action) {
     const b = document.createElement("button");
     b.textContent = action.label;
+    if (action.primary) b.className = "toast-primary";
     b.addEventListener("click", () => {
       el.hidden = true;
       action.run();
@@ -3229,13 +3231,15 @@ function renderAttachments(folder, uid, list) {
   box.replaceChildren(
     ...list.map((a) => {
       const chip = el("button", "attachment");
-      chip.title = `Save ${a.name}`;
+      chip.title = `Save ${a.name} · or drag it to a folder`;
       chip.append(icon("paperclip"), el("span", "att-name", a.name), el("span", "att-size muted", formatSize(a.size)), icon("download", "att-dl"));
+      dragOut(chip, () => invoke("prepare_attachment", { folder, uid, index: a.index }));
       chip.addEventListener("click", async () => {
+        if (Date.now() - (chip.draggedAt || 0) < 400) return; // the end of a drag, not a click
         chip.disabled = true;
         try {
           const path = await invoke("save_attachment", { folder, uid, index: a.index });
-          if (path) toast("Saved to " + path, "info");
+          if (path) savedToast("Saved", path);
         } catch (e) {
           toast("Could not save the attachment: " + e);
         } finally {
@@ -3245,6 +3249,50 @@ function renderAttachments(folder, uid, list) {
       return chip;
     }),
   );
+}
+
+const IS_MAC = /Mac/.test(navigator.platform || navigator.userAgent);
+
+/// "Saved in Downloads" (the folder only; the full path when pointing at
+/// it), with a button that shows the file in its folder.
+function savedToast(what, path) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  const folder = parts.length > 1 ? parts[parts.length - 2] : path;
+  toast(`${what} in ${folder}`, "info", { label: IS_MAC ? "Show in Finder" : "Show in folder", primary: true, run: () => invoke("reveal_file", { path }).catch((e) => toast(String(e))) }, 8);
+  $("toast").title = path;
+}
+
+/// Lets an element be dragged out of the app as a file: moving it a few
+/// pixels while pressed writes the file (`prepare`) and hands it to the
+/// system's drag, so it can be dropped on the Finder, the desktop or another
+/// app. A plain click writes nothing.
+function dragOut(item, prepare) {
+  item.addEventListener("mousedown", (down) => {
+    if (down.button !== 0) return;
+    let pressed = true;
+    let started = false;
+    const move = async (ev) => {
+      if (started || Math.hypot(ev.clientX - down.clientX, ev.clientY - down.clientY) < 5) return;
+      started = true;
+      item.classList.add("dragging-out");
+      const path = await prepare().catch((e) => {
+        toast("Could not prepare the file: " + e);
+        return null;
+      });
+      // The system's drag needs the button still down.
+      if (path && pressed) invoke("drag_attachment", { path }).catch((e) => toast("Could not drag the file: " + e));
+      item.classList.remove("dragging-out");
+    };
+    const up = () => {
+      pressed = false;
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up, true);
+      // A press without a move is a click: it saves as before.
+      if (started) item.draggedAt = Date.now();
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up, true);
+  });
 }
 
 function updateRemoteNote() {
@@ -5126,7 +5174,7 @@ $("save-folder-pick").addEventListener("click", chooseSaveFolder);
 $("export-settings").addEventListener("click", async () => {
   try {
     const path = await invoke("export_settings");
-    if (path) toast("Settings saved to " + path, "info");
+    if (path) savedToast("Settings saved", path);
   } catch (e) {
     toast("Export failed: " + e);
   }

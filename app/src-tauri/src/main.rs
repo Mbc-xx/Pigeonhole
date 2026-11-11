@@ -1426,10 +1426,7 @@ async fn save_file(window: &tauri::Window, name: &str, bytes: &[u8]) -> CmdResul
         unique_path(dir, name)
     };
     std::fs::write(&path, bytes).map_err(|e| format!("cannot save {}: {e}", path.display()))?;
-    // Whoever just chose the place knows where it is.
-    if !asked {
-        reveal_in_file_manager(&path);
-    }
+    // The UI offers to show it: opening a Finder window on every save gets in the way.
     Ok(Some(path.display().to_string()))
 }
 
@@ -1472,6 +1469,65 @@ fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
         .map(|n| dir.join(format!("{stem} ({n}){ext}")))
         .find(|p| !p.exists())
         .unwrap()
+}
+
+/// Shows a saved file in the Finder (Explorer on Windows), selected.
+#[tauri::command]
+fn reveal_file(path: String) -> CmdResult<()> {
+    let path = std::path::PathBuf::from(path);
+    if !path.is_absolute() || !path.exists() {
+        return Err("the file is no longer there (moved or deleted?)".into());
+    }
+    reveal_in_file_manager(&path);
+    Ok(())
+}
+
+/// Where attachments wait while they are dragged out of the app. Inside the
+/// user's own temporary folder; emptied at every start.
+fn drag_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("Pigeonhole-drag")
+}
+
+/// Writes an attachment where it can be dragged from, keeping its name, and
+/// returns its path. Copies older than an hour are removed meanwhile.
+#[tauri::command]
+async fn prepare_attachment(folder: String, uid: u32, index: usize, state: State<'_, AppState>) -> CmdResult<String> {
+    let raw = raw_email(&state, &folder, uid).await?;
+    let (name, bytes) = kanbanmail_core::message::attachment(&raw, index).ok_or("attachment not found")?;
+    let root = drag_dir();
+    if let Ok(list) = std::fs::read_dir(&root) {
+        let old = |e: &std::fs::DirEntry| e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|age| age > Duration::from_secs(3600)));
+        for entry in list.flatten().filter(old) {
+            std::fs::remove_dir_all(entry.path()).ok();
+        }
+    }
+    // A folder of its own, so two attachments with the same name do not clash.
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let dir = root.join(format!("{uid}-{index}-{stamp}"));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(safe_file_name(&name));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
+/// Starts dragging a prepared attachment out of the window: dropped on the
+/// Finder, the desktop or another app, it is copied there. Only files
+/// prepared by [`prepare_attachment`] can be dragged.
+#[tauri::command]
+fn drag_attachment(path: String, window: tauri::WebviewWindow, app: AppHandle) -> CmdResult<()> {
+    let path = std::path::PathBuf::from(path);
+    let inside = path.canonicalize().ok().zip(drag_dir().canonicalize().ok()).is_some_and(|(p, root)| p.starts_with(root));
+    if !inside || !path.is_file() {
+        return Err("this file cannot be dragged".into());
+    }
+    let icon = include_bytes!("../icons/64x64.png").to_vec();
+    app.run_on_main_thread(move || {
+        let result = drag::start_drag(&window, drag::DragItem::Files(vec![path]), drag::Image::Raw(icon), |_, _| {}, drag::Options::default());
+        if let Err(e) = result {
+            eprintln!("could not start dragging: {e}");
+        }
+    })
+    .map_err(|e| e.to_string())
 }
 
 fn reveal_in_file_manager(path: &std::path::Path) {
@@ -1881,6 +1937,11 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(external_links())
         .manage(AppState::default())
+        .setup(|_| {
+            // Attachments dragged out last time are not needed any more.
+            std::fs::remove_dir_all(drag_dir()).ok();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_status,
             login,
@@ -1914,6 +1975,9 @@ fn main() {
             discard_draft,
             save_attachment,
             pick_save_folder,
+            reveal_file,
+            prepare_attachment,
+            drag_attachment,
             load_thread,
             set_unread_badge,
             set_sender_rule,
