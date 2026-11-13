@@ -91,6 +91,7 @@
       <button id="toggle-sidebar" class="icon-btn" title="Expand/collapse the sidebar (Ctrl/⌘+B)"><svg class="icon"><use href="#i-sidebar"/></svg></button>
       <nav id="account-rail" class="account-rail" aria-label="Accounts"></nav>
       <div id="sync" class="sync" data-level="busy"><span class="sync-light"></span><span id="sync-status" class="muted"></span></div>
+      <div id="today" class="today" hidden></div>
       <div class="spacer"></div>
       <div class="search-box">
         <svg class="icon"><use href="#i-search"/></svg>
@@ -179,6 +180,7 @@
             <button id="reader-trash" title="Delete this email (move to trash)"><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
             <button id="reader-spam" title="Move to Junk"><svg class="icon"><use href="#i-junk"/></svg><span>Spam</span></button>
             <button id="reader-move" title="Move this email to a folder…"><svg class="icon"><use href="#i-folder"/></svg><span>Move</span></button>
+            <button id="reader-snooze" title="Snooze: put it aside until later (Z)"><svg class="icon"><use href="#i-calendar"/></svg><span>Snooze</span></button>
             <button id="reader-task" title="Link this email to a task (Jira and the like)…"><svg class="icon"><use href="#i-link"/></svg><span>Task</span></button>
             <span id="reader-seen-hint" class="muted"></span>
           </div>
@@ -655,5 +657,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="app.js"></script>
+  <script src="board.js"></script>
+  <script src="organize.js"></script>
+  <script src="reader.js"></script>
+  <script src="compose.js"></script>
+  <script src="settings.js"></script>
 </body>
 </html>

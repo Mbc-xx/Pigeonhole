@@ -12,6 +12,7 @@ use kanbanmail_core::{
     settings::{Sender, Settings},
     smtp::{self, Draft},
     store::Store,
+    snooze::{self, Snoozed},
     tasks::{self, Task},
 };
 use serde::Deserialize;
@@ -588,6 +589,7 @@ async fn watch_folder(
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum QueuedOp {
+    // One email: written by older versions, still found in their queues.
     Move { from: String, uid: u32, to: String },
     File { folder: String, uid: u32, kind: String },
     /// Several emails of one folder, moved with a single request.
@@ -917,14 +919,6 @@ async fn raw_email(state: &AppState, folder: &str, uid: u32) -> CmdResult<Vec<u8
             Err(e)
         }
     }
-}
-
-#[tauri::command]
-/// true when moved now, false when the move waits for the connection.
-async fn move_card(from: String, uid: u32, to: String, app: AppHandle, state: State<'_, AppState>) -> CmdResult<bool> {
-    let outcome = perform_or_queue(&app, &state, QueuedOp::Move { from: from.clone(), uid, to }).await?;
-    state.with_store(|st| st.remove(&from, &[uid]));
-    Ok(matches!(outcome, Outcome::Done(_)))
 }
 
 /// Moves several emails of one folder at once. true when moved now, false
@@ -1288,6 +1282,28 @@ fn rename_task(url: String, name: String) -> CmdResult<Vec<Task>> {
     })
 }
 
+/// The emails put aside until a time, soonest first.
+#[tauri::command]
+fn list_snoozed() -> CmdResult<Vec<Snoozed>> {
+    snooze::load().map_err(err)
+}
+
+#[tauri::command]
+fn add_snoozed(items: Vec<Snoozed>) -> CmdResult<Vec<Snoozed>> {
+    let mut list = snooze::load().map_err(err)?;
+    snooze::add(&mut list, items);
+    snooze::save(&list).map_err(err)?;
+    Ok(list)
+}
+
+#[tauri::command]
+fn remove_snoozed(ids: Vec<String>) -> CmdResult<Vec<Snoozed>> {
+    let mut list = snooze::load().map_err(err)?;
+    snooze::remove(&mut list, &ids);
+    snooze::save(&list).map_err(err)?;
+    Ok(list)
+}
+
 /// The emails of a task known to the local copy: the linked ones and the
 /// rest of their conversations (instant, offline).
 #[tauri::command]
@@ -1572,19 +1588,6 @@ async fn folder_unseen(folders: Vec<String>, state: State<'_, AppState>) -> CmdR
         counts.insert(folder, count);
     }
     Ok(counts)
-}
-
-/// Moves the email to the trash (`kind` = "trash") or the archive ("archive").
-/// Returns the destination folder name.
-#[tauri::command]
-/// Returns the destination folder, or "" when the move waits for the connection.
-async fn file_card(folder: String, uid: u32, kind: String, app: AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
-    let outcome = perform_or_queue(&app, &state, QueuedOp::File { folder: folder.clone(), uid, kind }).await?;
-    state.with_store(|st| st.remove(&folder, &[uid]));
-    Ok(match outcome {
-        Outcome::Done(target) => target.unwrap_or_default(),
-        Outcome::Queued => String::new(),
-    })
 }
 
 /// Contacts from the system address book (only when enabled in settings).
@@ -1963,7 +1966,6 @@ fn main() {
             forget_account,
             open_board,
             load_column,
-            move_card,
             move_cards,
             ensure_folder,
             file_cards,
@@ -1976,7 +1978,6 @@ fn main() {
             send_mail,
             list_folders,
             folder_unseen,
-            file_card,
             new_message_id,
             save_draft,
             discard_draft,
@@ -2003,6 +2004,9 @@ fn main() {
             unlink_task,
             rename_task,
             task_emails,
+            list_snoozed,
+            add_snoozed,
+            remove_snoozed,
             cache_stats,
             clear_cache,
             flush_queue,

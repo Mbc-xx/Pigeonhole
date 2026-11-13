@@ -80,6 +80,17 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   you choose (off by default), to Archive or to a folder of yours such as "Done
   archive" (created if missing). Pinned and unread emails stay; it happens while
   the app is open, with Undo.
+- Today, in the top bar: how many to-dos are late, how many answers arrived in
+  Waiting and how many drafts are not sent; a click shows the column or Drafts.
+  A notification also tells you when an answer arrives to an email you wait on.
+- Snooze: put an email aside until later today, tomorrow or Monday morning, or
+  in a week (reader button, right-click menu or Z). It waits in a "Snoozed"
+  folder, shows when it comes back, and returns where it was while the app is
+  open; a click on its tag brings it back at once.
+- Keyboard: ↑ ↓ (or J K) move between emails, ← → between columns, Enter opens;
+  E archives, ⌫ deletes, R / A / F reply, reply all and forward, U read or
+  unread, P pins, M moves (type to find the folder), Z snoozes, N writes a new
+  email; ? lists them all. With an email open, ↑ ↓ read the previous or next one.
 - Board columns are edited from the settings (add, rename, drag to reorder,
   remove; type a new folder name to create it).
 - "Load more" at the bottom of a column or folder for older emails.
@@ -161,7 +172,8 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   follow; the sidebar has a Tasks tab beside Folders, with a field to find a task, and
   a click shows all the emails of one. The links
   stay on your computer, in a file beside the settings, and are part of the exported settings.
-- Move to… lists: the folders offered are chosen apart from the sidebar, one tick per
+- Move to… lists start with a field to find a folder by name (Enter takes the
+  first). The folders offered are chosen apart from the sidebar, one tick per
   folder or copied from it (Settings → Folders); "All folders…" shows the others when needed.
 - Sidebar folders: choose which ones to show, drag them into your order and pick a color
   (Settings → Folders). The color also marks the board column and the folder
@@ -287,7 +299,9 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 crates/kanbanmail-core   shared logic: account, board, keychain, IMAP, SMTP, MIME parsing
 crates/kanbanmail-cli    command-line test tool
 app/src-tauri            desktop app (Tauri backend)
-app/ui                   user interface (HTML/CSS/JS, no external libraries)
+app/ui                   user interface (HTML/CSS/JS, no external libraries): app.js,
+                         board.js, organize.js, reader.js, compose.js, settings.js,
+                         loaded in this order and sharing one scope
 ```
 
 ## Running the app

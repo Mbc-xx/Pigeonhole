@@ -21,7 +21,13 @@ pub struct Session {
     open: Option<(String, bool)>,
     /// Special folders found so far ("trash" -> "[Gmail]/Trash").
     special: std::collections::HashMap<String, String>,
+    /// The last list of every folder, and when it was read: several lookups
+    /// in a row (All Mail, a search, a move) ask the server only once.
+    listed: Option<(std::time::Instant, Arc<Vec<async_imap::types::Name>>)>,
 }
+
+/// How long the list of folders is trusted before it is read again.
+const LIST_FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl std::ops::Deref for Session {
     type Target = Connection;
@@ -38,7 +44,25 @@ impl std::ops::DerefMut for Session {
 
 impl Session {
     fn new(conn: Connection) -> Self {
-        Session { conn, open: None, special: Default::default() }
+        Session { conn, open: None, special: Default::default(), listed: None }
+    }
+
+    /// Every folder on the server (from the last minute's list when there is one).
+    pub async fn list_all(&mut self) -> Result<Arc<Vec<async_imap::types::Name>>> {
+        if let Some((at, names)) = &self.listed {
+            if at.elapsed() < LIST_FRESH_FOR {
+                return Ok(names.clone());
+            }
+        }
+        let names: Vec<_> = self.conn.list(Some(""), Some("*")).await.context("LIST command failed")?.try_collect().await?;
+        let names = Arc::new(names);
+        self.listed = Some((std::time::Instant::now(), names.clone()));
+        Ok(names)
+    }
+
+    /// The folders changed (one was created): the next list asks the server.
+    pub fn forget_list(&mut self) {
+        self.listed = None;
     }
 
     /// Opens a folder for changes and reports its state (always asks the server).
@@ -145,12 +169,7 @@ impl async_imap::Authenticator for XOAuth2 {
 
 /// Lists the names of all IMAP folders.
 pub async fn list_folders(session: &mut Session) -> Result<Vec<String>> {
-    let names: Vec<_> = session
-        .list(Some(""), Some("*"))
-        .await
-        .context("LIST command failed")?
-        .try_collect()
-        .await?;
+    let names = session.list_all().await?;
     let mut out: Vec<String> = names.iter().map(|n| n.name().to_string()).collect();
     out.sort();
     Ok(out)
@@ -186,12 +205,7 @@ pub async fn server_caps(session: &mut Session) -> Result<ServerCaps> {
 /// Finds the real server folder for each requested name, creating missing
 /// ones. Example: on SiteGround "Todo" becomes "INBOX.Todo".
 pub async fn resolve_folders(session: &mut Session, wanted: &[String]) -> Result<Vec<String>> {
-    let names: Vec<_> = session
-        .list(Some(""), Some("*"))
-        .await
-        .context("LIST command failed")?
-        .try_collect()
-        .await?;
+    let names = session.list_all().await?;
     let delim = names
         .iter()
         .find_map(|n| n.delimiter().map(str::to_string))
@@ -218,6 +232,7 @@ pub async fn resolve_folders(session: &mut Session, wanted: &[String]) -> Result
             .create(&target)
             .await
             .with_context(|| format!("cannot create folder {target}"))?;
+        session.forget_list();
         session.subscribe(&target).await.ok();
         out.push(target);
     }
@@ -441,13 +456,13 @@ pub async fn set_flagged(session: &mut Session, folder: &str, uid: u32, flagged:
 /// or after `max_wait`. Gives the session back so it can be reused.
 pub async fn wait_for_change(mut session: Session, folder: &str, max_wait: std::time::Duration) -> Result<Session> {
     session.select(folder).await.with_context(|| format!("cannot open {folder}"))?;
-    let Session { conn, open, special } = session;
+    let Session { conn, open, special, listed } = session;
     let mut idle = conn.idle();
     idle.init().await.context("IDLE did not start")?;
     let (wait, _stop) = idle.wait_with_timeout(max_wait);
     wait.await.context("IDLE interrupted")?;
     let conn = idle.done().await.context("ending IDLE failed")?;
-    Ok(Session { conn, open, special })
+    Ok(Session { conn, open, special, listed })
 }
 
 /// Marks an email as read or unread (\Seen flag).
@@ -477,7 +492,7 @@ pub async fn set_answered(session: &mut Session, folder: &str, uid: u32) -> Resu
 /// The folder holding every email (Gmail's All Mail), if the server has one.
 pub async fn all_mail_folder(session: &mut Session) -> Result<Option<String>> {
     use async_imap::types::NameAttribute;
-    let names: Vec<_> = session.list(Some(""), Some("*")).await?.try_collect().await?;
+    let names = session.list_all().await?;
     Ok(names.iter().find(|n| n.attributes().iter().any(|a| matches!(a, NameAttribute::All))).map(|n| n.name().to_string()))
 }
 
@@ -496,12 +511,7 @@ pub async fn sent_folder(session: &mut Session) -> Result<String> {
 
 async fn look_for_sent_folder(session: &mut Session) -> Result<String> {
     use async_imap::types::NameAttribute;
-    let names: Vec<_> = session
-        .list(Some(""), Some("*"))
-        .await
-        .context("LIST command failed")?
-        .try_collect()
-        .await?;
+    let names = session.list_all().await?;
     if let Some(n) = names.iter().find(|n| n.attributes().iter().any(|a| matches!(a, NameAttribute::Sent))) {
         return Ok(n.name().to_string());
     }
@@ -581,12 +591,9 @@ fn folder_kind(name: &str, attrs: &[async_imap::types::NameAttribute<'_>], delim
 /// All folders, sorted as a tree, with unread counts.
 pub async fn folder_tree(session: &mut Session) -> Result<Vec<FolderInfo>> {
     use async_imap::types::NameAttribute;
-    let names: Vec<_> = session
-        .list(Some(""), Some("*"))
-        .await
-        .context("LIST command failed")?
-        .try_collect()
-        .await?;
+    // The sidebar shows folders made elsewhere too: always the server's list.
+    session.forget_list();
+    let names = session.list_all().await?;
     let delim = names.iter().find_map(|n| n.delimiter()).unwrap_or(".").to_string();
     let prefix = format!("INBOX{delim}");
     let mut out: Vec<FolderInfo> = names
@@ -647,7 +654,7 @@ pub async fn find_special_folder(session: &mut Session, kind: &str) -> Result<Op
 }
 
 async fn look_for_special_folder(session: &mut Session, kind: &str) -> Result<Option<String>> {
-    let names: Vec<_> = session.list(Some(""), Some("*")).await?.try_collect().await?;
+    let names = session.list_all().await?;
     let delim = names.iter().find_map(|n| n.delimiter()).unwrap_or(".").to_string();
     let by_attribute = names
         .iter()
@@ -746,9 +753,7 @@ pub struct ThreadEntry {
     pub card: crate::message::Card,
 }
 
-fn bare_id(id: &str) -> String {
-    id.trim().trim_start_matches('<').trim_end_matches('>').to_string()
-}
+use crate::store::bare_id;
 
 /// `OR a OR b c` from a list of IMAP search keys.
 fn or_chain(keys: &[String]) -> String {
@@ -878,7 +883,7 @@ fn search_rank(name: &str, is_all: bool) -> (bool, bool, String) {
 /// holding every email (Gmail's All Mail) comes last, when there is one.
 pub async fn searchable_folders(session: &mut Session) -> Result<Vec<String>> {
     use async_imap::types::NameAttribute;
-    let names: Vec<_> = session.list(Some(""), Some("*")).await?.try_collect().await?;
+    let names = session.list_all().await?;
     let mut out: Vec<(String, bool)> = names
         .iter()
         .filter(|n| !n.attributes().iter().any(|a| matches!(a, NameAttribute::NoSelect)))
@@ -969,7 +974,7 @@ pub async fn search(
 /// Everyone you have written to: the To/Cc/Bcc addresses of the most recent
 /// `limit` emails in every sent-mail folder, lowercased.
 pub async fn sent_recipients(session: &mut Session, limit: u32) -> Result<std::collections::BTreeSet<String>> {
-    let names: Vec<_> = session.list(Some(""), Some("*")).await?.try_collect().await?;
+    let names = session.list_all().await?;
     let delim = names.iter().find_map(|n| n.delimiter()).unwrap_or(".").to_string();
     let sent: Vec<String> = names
         .iter()

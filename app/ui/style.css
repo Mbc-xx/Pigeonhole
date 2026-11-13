@@ -1213,3 +1213,20 @@ body.resizing { cursor: col-resize; user-select: none; }
 #dialog-message { white-space: pre-line; overflow-wrap: anywhere; }
 /* An attachment being dragged out to a folder. */
 .attachment.dragging-out { opacity: 0.55; }
+/* The card picked with the arrow keys. */
+.card.kbd-focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Today: what needs a look, in the top bar. */
+.today { display: flex; gap: 6px; flex-shrink: 0; }
+.today[hidden] { display: none; }
+.today-chip { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 11px; border: 0; cursor: pointer; white-space: nowrap; }
+.today-chip.late { background: color-mix(in srgb, var(--pin) 18%, transparent); color: var(--pin); }
+.today-chip.replied { background: color-mix(in srgb, #1f9d55 18%, transparent); color: #1b8a4a; }
+.today-chip.draft { background: color-mix(in srgb, #dc2626 16%, transparent); color: #c62828; }
+:root[data-theme="dark"] .today-chip.replied, :root[data-theme="ocean"] .today-chip.replied, :root[data-theme="forest"] .today-chip.replied, :root[data-theme="midnight"] .today-chip.replied, :root[data-custom-mode="dark"] .today-chip.replied { color: #4ade80; }
+:root[data-theme="dark"] .today-chip.draft, :root[data-theme="ocean"] .today-chip.draft, :root[data-theme="forest"] .today-chip.draft, :root[data-theme="midnight"] .today-chip.draft, :root[data-custom-mode="dark"] .today-chip.draft { color: #f87171; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) .today-chip.replied { color: #4ade80; } :root:not([data-theme]) .today-chip.draft { color: #f87171; } }
+.column.flash { animation: column-flash 1.2s ease-out; }
+@keyframes column-flash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* Snoozed emails: when they come back. */
+.snooze-tag { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-ink); font-weight: 600; cursor: pointer; }
+.conv-menu .menu-items { display: flex; flex-direction: column; }

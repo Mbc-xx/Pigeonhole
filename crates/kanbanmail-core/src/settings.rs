@@ -182,6 +182,10 @@ fn default_preview_list() -> u32 {
     1
 }
 
+/// The settings file read last: its path, (modified time, size) and content.
+type Loaded = Option<(std::path::PathBuf, (Option<std::time::SystemTime>, u64), Settings)>;
+static LOADED: std::sync::Mutex<Loaded> = std::sync::Mutex::new(None);
+
 fn default_waiting_days() -> u32 {
     3
 }
@@ -336,11 +340,19 @@ impl Settings {
 
     pub fn load_from(dir: &Path) -> Result<Settings> {
         let path = dir.join("settings.toml");
-        if !path.exists() {
-            return Ok(Settings::default());
+        let Ok(meta) = std::fs::metadata(&path) else { return Ok(Settings::default()) };
+        // Read often (every send, every background round): parsed again only
+        // when the file changed.
+        let stamp = (meta.modified().ok(), meta.len());
+        if let Some((p, s, settings)) = LOADED.lock().unwrap().as_ref() {
+            if *p == path && *s == stamp {
+                return Ok(settings.clone());
+            }
         }
         let text = std::fs::read_to_string(&path)?;
-        toml::from_str(&text).with_context(|| format!("invalid {}", path.display()))
+        let settings: Settings = toml::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
+        *LOADED.lock().unwrap() = Some((path, stamp, settings.clone()));
+        Ok(settings)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -350,6 +362,8 @@ impl Settings {
     fn save_to(&self, dir: &Path) -> Result<()> {
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("settings.toml"), toml::to_string_pretty(self)?)?;
+        // The next load reads what was just written, whatever the clock says.
+        *LOADED.lock().unwrap() = None;
         Ok(())
     }
 
