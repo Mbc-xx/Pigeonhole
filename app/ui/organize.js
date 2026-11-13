@@ -135,7 +135,7 @@ const KEYBOARD_HELP = `Moving
 ↑ ↓ (or J K)  previous / next email
 ← →  previous / next column
 Enter  open the email
-Esc  close
+Esc  close, or drop the outline
 
 On the email picked or open
 E  archive
@@ -195,6 +195,9 @@ function neighbour(from, { step = 0, side = 0 }) {
   const cards = boardCards(column);
   return cards[cards.indexOf(from) + step] || from;
 }
+
+// The outline is for the keys: using the mouse takes it away.
+document.addEventListener("mousedown", () => focusKey && setFocus(null), true);
 
 function moveFocus(where) {
   const from = currentCardEl();

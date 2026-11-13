@@ -986,6 +986,7 @@ document.addEventListener("keydown", (ev) => {
   else if (!$("composer").hidden && !composerMinimized()) closeComposer();
   else if (!$("settings").hidden) closeSettingsWithoutSaving();
   else if (!$("reader").hidden) closeReader();
+  else if (focusKey) setFocus(null);
 });
 
 // ---------- confirmation dialog ----------

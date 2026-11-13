@@ -91,6 +91,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   E archives, ⌫ deletes, R / A / F reply, reply all and forward, U read or
   unread, P pins, M moves (type to find the folder), Z snoozes, N writes a new
   email; ? lists them all. With an email open, ↑ ↓ read the previous or next one.
+  The outline of the picked email goes away with a click anywhere or Esc.
 - Board columns are edited from the settings (add, rename, drag to reorder,
   remove; type a new folder name to create it).
 - "Load more" at the bottom of a column or folder for older emails.
