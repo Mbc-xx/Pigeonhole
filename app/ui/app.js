@@ -1143,6 +1143,7 @@ async function openBoard({ fromCache = false, retry = false } = {}) {
     loadKnownSenders();
     invoke("list_tasks").then(setTasks, () => setTasks([]));
     await Promise.all(state.columns.map((c) => loadColumn(c.folder)));
+    refreshDrafts(0);
     checkOtherAccounts();
     // Rules and notifications also work when the Inbox is not a board column.
     if (!state.columns.some((c) => c.folder.toUpperCase() === "INBOX")) checkInbox();
@@ -1386,6 +1387,7 @@ async function loadColumn(folder) {
       afterInboxLoaded(state.cards[folder]);
       updateBadge();
     }
+    if (folder === draftsFolder()) indexDrafts();
   } catch (e) {
     // Keep showing what is known (from this Mac, or loaded before).
     renderCards(folder);
@@ -2061,13 +2063,15 @@ function renderCard(folder, card, group = null, { child = false } = {}) {
     date.prepend(...taskTags(members));
     const todoLate = todoTag(members);
     if (todoLate) date.prepend(todoLate);
+    const unsent = draftTag(members, folder);
+    if (unsent) date.prepend(unsent);
     c.append(from, main, date, actions);
     // Preview below, from under the sender to under the subject.
     if (card.preview && !child) c.append(el("div", "row-preview", card.preview));
     if (readerCard && readerCard.folder === folder && readerCard.card.uid === card.uid) c.classList.add("selected");
   } else {
     c.append(actions, fromLine, el("div", "subject", card.subject || "(no subject)"), el("div", "preview", card.preview));
-    const extra = [todoTag(members), ...taskTags(members)].filter(Boolean);
+    const extra = [draftTag(members, folder), todoTag(members), ...taskTags(members)].filter(Boolean);
     const tags = waitingTags(members) || (extra.length ? el("div", "wait-tags") : null);
     if (tags) {
       tags.append(...extra);
@@ -2509,6 +2513,7 @@ async function loadFolders() {
     const known = new Map(state.folders.map((f) => [f.name, f.unseen]));
     state.folders = (await invoke("list_folders")).map((f) => ({ ...f, unseen: known.get(f.name) }));
     refreshSentForWaiting();
+    if (!draftIndex.size) refreshDrafts(0);
     paintFolderCounts();
     await refreshUnseen(state.folders.filter(countsUnseen).map((f) => f.name));
   } catch (e) {
@@ -2693,6 +2698,93 @@ function setupFolderDrop(item, folder) {
     const drag = state.dragging;
     if (drag && drag.folder !== folder) dropDragged(drag, folder);
   });
+}
+
+// ---------- unsent drafts ----------
+
+// A reply left in Drafts looks like a reply sent: the conversations it
+// belongs to show it, so it is not forgotten.
+let draftIndex = new Map(); // Message-ID an unsent reply refers to -> that draft
+
+const draftsFolder = () => state.folders.find((f) => f.kind === "drafts")?.name;
+
+/// Reads Drafts again (a moment after a change) and shows what it holds.
+let draftsTimer;
+function refreshDrafts(delay = 800) {
+  clearTimeout(draftsTimer);
+  draftsTimer = setTimeout(() => {
+    const drafts = draftsFolder();
+    if (!drafts) return;
+    loadColumn(drafts);
+    touchedFolders.add(drafts);
+    scheduleFolderCounts();
+  }, delay);
+}
+
+/// Called whenever the Drafts list changed.
+function indexDrafts() {
+  const drafts = draftsFolder();
+  const next = new Map();
+  for (const card of (drafts && state.cards[drafts]) || []) {
+    for (const id of (card.thread_refs || []).map(mailId).filter(Boolean)) next.set(id, card);
+  }
+  const same = next.size === draftIndex.size && [...next].every(([id, c]) => draftIndex.get(id)?.uid === c.uid);
+  draftIndex = next;
+  const f = state.folders.find((x) => x.name === drafts);
+  // The count is every draft (the server's number arrives later and wins).
+  if (f && state.cards[drafts]?.length > (f.unseen || 0)) {
+    f.unseen = state.cards[drafts].length;
+    paintFolderCounts();
+  }
+  if (same) return;
+  for (const c of visibleColumns()) if (c.folder !== drafts) renderCards(c.folder);
+  if (readerCard) renderReaderDraft();
+}
+
+/// The unsent draft of an email or conversation, if there is one.
+function draftOf(members) {
+  if (!draftIndex.size) return null;
+  for (const { card } of members) {
+    for (const id of [card.message_id, ...(card.thread_refs || [])].map(mailId)) {
+      if (id && draftIndex.has(id)) return draftIndex.get(id);
+    }
+  }
+  return null;
+}
+
+function draftTag(members, folder) {
+  const drafts = draftsFolder();
+  // In a list of several folders, or inside a conversation, a draft says what it is.
+  if (folder === drafts) {
+    if (!state.view || state.view.folder === drafts) return null;
+    const tag = el("span", "wait-tag draft-tag", "✎ Draft · not sent");
+    tag.title = "This email is still in Drafts: it has not been sent";
+    return tag;
+  }
+  const draft = draftOf(members);
+  if (!draft) return null;
+  const tag = el("button", "wait-tag draft-tag", "✎ Draft reply · not sent");
+  tag.type = "button";
+  tag.draggable = false;
+  tag.title = `A reply to this conversation is still in Drafts (${formatDate(draft.date, true)}): open it to finish and send it`;
+  tag.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openDraft(drafts, draft);
+  });
+  return tag;
+}
+
+/// The banner over an open email whose conversation has an unsent reply.
+function renderReaderDraft() {
+  const box = $("reader-draft");
+  const members = [readerCard, ...(readerThread || [])].filter(Boolean);
+  const draft = readerCard && folderKind(readerCard.folder) !== "drafts" ? draftOf(members) : null;
+  box.hidden = !draft;
+  if (!draft) return box.replaceChildren();
+  const open = el("button", "", "Open the draft");
+  open.type = "button";
+  open.addEventListener("click", () => openDraft(draftsFolder(), draft));
+  box.replaceChildren(el("span", "", `✎ A reply to this conversation is still in Drafts, not sent (saved ${formatDate(draft.date)}).`), open);
 }
 
 // ---------- tasks (Jira and the like) linked to emails ----------
@@ -3467,6 +3559,7 @@ async function openReader(folder, card, opts = {}) {
   updateSenderPanel();
   $("reader-subject").textContent = card.subject || "(no subject)";
   renderReaderTasks();
+  renderReaderDraft();
   $("reader-from").textContent = card.from || "(unknown sender)";
   $("reader-from-address").textContent = card.from_address && card.from_address !== card.from ? card.from_address : "";
   setAvatar($("reader-avatar"), card.from || card.from_address || "?");
@@ -3813,6 +3906,7 @@ document.addEventListener("keydown", (ev) => {
 /// With `anchor`, the open email keeps its place on screen while rows are added above it.
 function renderThread({ anchor = false } = {}) {
   updateConvBar();
+  renderReaderDraft();
   const scroller = $("reader-scroll");
   const card = $("message-card");
   const offsetBefore = card.offsetTop;
@@ -3845,7 +3939,18 @@ function fillThread() {
   const pos = idx >= 0 ? idx : entries.filter((e) => e.card.date <= current.card.date).length;
   const older = entries.slice(0, pos).filter((e) => !isCurrent(e));
   const newer = entries.slice(pos).filter((e) => !isCurrent(e));
+  const drafts = draftsFolder();
   const row = (e) => {
+    if (e.folder === drafts) {
+      // Not an email of the conversation yet: a reply not sent.
+      const r = el("div", "thread-row draft");
+      r.title = "Still in Drafts: open it to finish and send it";
+      const from = el("span", "t-from");
+      from.append(el("span", "wait-tag draft-tag", "✎ Draft · not sent"));
+      r.append(el("span", "avatar draft-avatar", "✎"), from, el("span", "t-preview", e.card.preview || e.card.subject), el("span", "t-date", formatDate(e.card.date)));
+      r.addEventListener("click", () => openDraft(e.folder, e.card));
+      return r;
+    }
     const r = el("div", "thread-row" + (e.card.seen ? "" : " unseen"));
     r.title = `${e.card.subject} — ${e.folder}`;
     const reply = el("button", "t-reply");
@@ -4208,7 +4313,7 @@ async function saveDraft() {
       compose.saved = snapshot;
       compose.hasDraft = true;
       setComposeStatus("Draft saved " + new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }));
-      if (columnEl(folder)) scheduleReload(folder);
+      refreshDrafts(1500);
       return true;
     })
     .catch((e) => {
@@ -4328,8 +4433,7 @@ async function discardComposer() {
     } catch (e) {
       toast("Could not delete the draft: " + e);
     }
-    const drafts = state.folders.find((f) => f.kind === "drafts")?.name;
-    if (drafts && columnEl(drafts)) loadColumn(drafts);
+    refreshDrafts(0);
   }
 }
 
@@ -4888,8 +4992,7 @@ async function sendPending(pending) {
     toast("Sending failed: " + e, "error", { label: "Open", run: () => reopenPending(pending) });
   }
   state.sending--;
-  const drafts = state.folders.find((f) => f.kind === "drafts")?.name;
-  if (drafts && columnEl(drafts)) loadColumn(drafts);
+  refreshDrafts(0);
 }
 
 /// Puts the copy of a sent email on screen. A server that saves it by itself

@@ -266,7 +266,11 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - Drafts: while writing, the email is saved to the Drafts folder every 15
   seconds (only when it changed). Closing the composer keeps the draft;
   "Discard" deletes it; sending removes it. Click a card in Drafts to keep
-  writing it. Only the latest version is kept on the server.
+  writing it. Only the latest version is kept on the server. The Drafts
+  counter in the sidebar counts every draft, not only unread ones. A reply
+  left in Drafts is hard to miss: its conversation shows "✎ Draft reply · not
+  sent" on the board and in the lists, the open email has a banner with "Open
+  the draft", and inside the conversation the draft is marked in red.
 - Address suggestions while writing: from the senders of loaded emails and,
   if enabled, from the system address book (macOS Contacts only for now;
   macOS asks for permission the first time).

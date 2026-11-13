@@ -1011,6 +1011,12 @@ pub async fn folder_unseen(session: &mut Session, folder: &str) -> Result<u32> {
     Ok(mb.unseen.unwrap_or(0))
 }
 
+/// How many emails a folder holds, read or not.
+pub async fn folder_total(session: &mut Session, folder: &str) -> Result<u32> {
+    let mb = session.status(folder, "(MESSAGES)").await.with_context(|| format!("cannot read {folder}"))?;
+    Ok(mb.exists)
+}
+
 /// A cheap fingerprint of a folder (count, next UID, unread count and, with
 /// CONDSTORE, the modification sequence that also changes on flag updates).
 /// When it changes, something happened in the folder.

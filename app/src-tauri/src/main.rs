@@ -1561,7 +1561,14 @@ async fn folder_unseen(folders: Vec<String>, state: State<'_, AppState>) -> CmdR
     let mut counts = HashMap::new();
     for folder in folders {
         let mut inner = state.inner.lock().await;
-        let count = read_retry!(inner, |s, _caps| imap::folder_unseen(s, &folder))?;
+        // Drafts are saved as read, yet each one is something not sent: they all count.
+        let count = read_retry!(inner, |s, _caps| async {
+            if imap::find_special_folder(s, "drafts").await?.as_deref() == Some(folder.as_str()) {
+                imap::folder_total(s, &folder).await
+            } else {
+                imap::folder_unseen(s, &folder).await
+            }
+        })?;
         counts.insert(folder, count);
     }
     Ok(counts)

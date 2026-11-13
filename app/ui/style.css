@@ -366,6 +366,17 @@ button.primary:hover { background: var(--accent); filter: brightness(1.08); }
 .task-tag:hover { filter: brightness(0.95); }
 .task-tag .icon { width: 11px; height: 11px; flex-shrink: 0; }
 .task-tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A reply still in Drafts: hard to miss, since it looks like one sent. */
+.draft-tag { background: color-mix(in srgb, #dc2626 16%, transparent); color: #c62828; font-weight: 600; cursor: pointer; }
+:root[data-theme="dark"] .draft-tag, :root[data-theme="ocean"] .draft-tag, :root[data-theme="forest"] .draft-tag, :root[data-theme="midnight"] .draft-tag, :root[data-custom-mode="dark"] .draft-tag { color: #f87171; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) .draft-tag { color: #f87171; } }
+span.draft-tag { cursor: default; }
+.reader-draft { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 8px; padding: 8px 12px; border-radius: var(--r-m); border: var(--hairline) solid color-mix(in srgb, #dc2626 45%, transparent); background: color-mix(in srgb, #dc2626 10%, transparent); font-size: 13px; }
+.reader-draft[hidden] { display: none; }
+.reader-draft span { flex: 1; min-width: 200px; }
+.reader-draft button { font-weight: 600; }
+.thread-row.draft { border-left: 3px solid #dc2626; background: color-mix(in srgb, #dc2626 7%, transparent); }
+.thread-row .draft-avatar { background: #dc2626; color: #fff; }
 .reader-tasks { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
 .conv-menu.task-menu { min-width: 260px; }
 .conv-menu .menu-input {
