@@ -200,6 +200,16 @@ function showDoneTarget() {
 }
 $("set-done-days").addEventListener("change", showDoneTarget);
 
+$("test-notification").addEventListener("click", async () => {
+  $("notify-state").textContent = "";
+  try {
+    await showNotification("Pigeonhole", "Notifications work: new emails will show up like this.");
+    $("notify-state").textContent = "Sent: it should appear at the top right.";
+  } catch (e) {
+    $("notify-state").textContent = String(e) === NOTIFY_DENIED ? "Turned off in System Settings → Notifications." : "Not sent: " + e;
+  }
+});
+
 // ---------- export / import ----------
 
 // ---------- where files are saved ----------

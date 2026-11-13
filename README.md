@@ -95,7 +95,10 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - Board columns are edited from the settings (add, rename, drag to reorder,
   remove; type a new folder name to create it).
 - "Load more" at the bottom of a column or folder for older emails.
-- macOS notifications for new Inbox emails: only important ones, all, or off.
+- macOS notifications for new Inbox emails: only important ones, all, or off. macOS
+  asks for permission the first time; Settings → Reading has "Send a test
+  notification", and if they are turned off the app offers to open System
+  Settings → Notifications.
 - Multiple selection: ⌘/Ctrl-click or Shift-click cards (or "Select" in the
   right-click menu), then Archive, Delete, Spam, Read, Unread, Pin or Move… from
   the bar at the bottom or the right-click menu, or drag them together.
@@ -279,7 +282,8 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - Drafts: while writing, the email is saved to the Drafts folder every 15
   seconds (only when it changed). Closing the composer keeps the draft;
   "Discard" deletes it; sending removes it. Click a card in Drafts to keep
-  writing it. Only the latest version is kept on the server. The Drafts
+  writing it, in the editor it was written in (plain, Markdown or visual, with its
+  formatting and rich signature). Only the latest version is kept on the server. The Drafts
   counter in the sidebar counts every draft, not only unread ones. A reply
   left in Drafts is hard to miss: its conversation shows "✎ Draft reply · not
   sent" on the board and in the lists, the open email has a banner with "Open

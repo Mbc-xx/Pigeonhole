@@ -333,6 +333,9 @@ fn attachment_parts(list: &[OutgoingAttachment]) -> Result<Vec<SinglePart>> {
         .collect()
 }
 
+/// Header of drafts saying how they were written: "rich", "markdown" or "plain".
+pub const DRAFT_FORMAT_HEADER: &str = "X-Pigeonhole-Format";
+
 fn build_message(
     account: &Account,
     draft: &Draft,
@@ -381,6 +384,14 @@ fn build_message(
         None => new_message_id(&account.email),
     };
     builder = builder.message_id(Some(message_id));
+    if is_draft {
+        // So that reopening the draft gives back the editor it was written in.
+        let format = if draft.html.as_deref().is_some_and(|h| !h.trim().is_empty()) { "rich" } else if draft.markdown { "markdown" } else { "plain" };
+        builder = builder.raw_header(lettre::message::header::HeaderValue::new(
+            lettre::message::header::HeaderName::new_from_ascii_str(DRAFT_FORMAT_HEADER),
+            format.to_string(),
+        ));
+    }
     let content = match draft.html.as_deref().filter(|h| !h.trim().is_empty()) {
         Some(html) => Some(visual_body(&draft.body, html)),
         None => html_body(&draft.body, draft.markdown, signature),

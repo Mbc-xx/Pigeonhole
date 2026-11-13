@@ -72,7 +72,7 @@ async function saveDraft() {
   return compose.saving;
 }
 
-async function openComposer({ to = "", cc = "", bcc = state.defaultBcc, subject = "", body = "", reply = null, context = null, title = "New email", messageId = null, fromDraft = false, attachments = [], from = "" } = {}) {
+async function openComposer({ to = "", cc = "", bcc = state.defaultBcc, subject = "", body = "", html = null, format = null, reply = null, context = null, title = "New email", messageId = null, fromDraft = false, attachments = [], from = "" } = {}) {
   if (!$("composer").hidden) {
     // One email at a time: the one being written (maybe minimized) comes back.
     minimizeComposer(false);
@@ -80,7 +80,8 @@ async function openComposer({ to = "", cc = "", bcc = state.defaultBcc, subject 
   }
   compose.attachments = attachments;
   compose.from = senderNamed(from)?.email || "";
-  const fmt = local.get("composeFormat");
+  // A draft opens in the editor it was written in; a new email in the usual one.
+  const fmt = format || local.get("composeFormat");
   compose.markdown = fmt === "markdown";
   compose.rich = fmt === "rich";
   setPreview(false);
@@ -93,7 +94,7 @@ async function openComposer({ to = "", cc = "", bcc = state.defaultBcc, subject 
   setRecipients("compose-bcc", bcc);
   $("compose-subject").value = subject;
   $("compose-body").value = body;
-  if (compose.rich) $("compose-rich").innerHTML = textToRichHtml(body);
+  if (compose.rich) $("compose-rich").innerHTML = html ?? textToRichHtml(body);
   renderComposeSender();
   setComposeStatus("");
   compose.reply = reply;
@@ -189,6 +190,11 @@ async function openDraft(folder, card) {
   try {
     const msg = await invoke("read_message", { folder, uid: card.uid });
     const attachments = await loadAttachments(folder, card.uid, msg.attachments || []);
+    // Written in the visual editor: its HTML comes back, with the formatting
+    // and the rich signature (drafts of older versions say nothing: then the
+    // HTML is used when the visual editor is the usual one).
+    const format = msg.draft_format || (msg.html && local.get("composeFormat") === "rich" ? "rich" : null);
+    const html = format === "rich" ? msg.html : null;
     openComposer({
       attachments,
       to: msg.to,
@@ -196,6 +202,8 @@ async function openDraft(folder, card) {
       bcc: msg.bcc,
       subject: msg.subject,
       body: msg.text || "",
+      html,
+      format: html || format !== "rich" ? format : null,
       context: msg.in_reply_to ? { in_reply_to: msg.in_reply_to, references: msg.references.filter((r) => r !== msg.in_reply_to) } : null,
       messageId: msg.message_id,
       from: msg.reply_address,

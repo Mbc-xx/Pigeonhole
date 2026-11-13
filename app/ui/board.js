@@ -117,6 +117,7 @@ async function openBoard({ fromCache = false, retry = false } = {}) {
       applySettingsState(settings);
       cacheSet("settings", settings);
       if (settings.use_system_contacts) loadContacts();
+      if (settings.notify !== "off") prepareNotifications();
     } catch (_) {}
     setSyncStatus(info.can_idle ? "Live updates on (IDLE)" : "Refreshing every 60 seconds");
     clearTimeout(offlineTimer);
@@ -460,7 +461,7 @@ async function afterInboxLoaded(cards) {
     toNotify.length === 1
       ? [toNotify[0].from || toNotify[0].from_address, toNotify[0].subject || "(no subject)"]
       : [`${toNotify.length} new emails`, toNotify.slice(0, 3).map((c) => `${shortName(c.from)}: ${c.subject}`).join("\n")];
-  invoke("notify", { title, body }).catch((e) => console.error("notification failed", e));
+  showNotification(title, body);
 }
 
 /// Keeps rules and notifications working while the Inbox is not on screen.
@@ -1591,4 +1592,33 @@ function scheduleFolderCounts() {
     const folders = state.folders.filter((f) => countsUnseen(f) && (f.kind === "inbox" || wanted.has(f.name)));
     refreshUnseen(folders.map((f) => f.name)).catch((e) => console.error(e));
   }, 3000);
+}
+
+// ---------- desktop notifications ----------
+
+// The backend's answer when the system does not allow notifications.
+const NOTIFY_DENIED = "Notifications are turned off for Pigeonhole in System Settings.";
+let notifyDeniedSaid = false;
+
+/// Says once per launch that notifications are off, with the way to turn them on.
+function notificationsOff() {
+  if (notifyDeniedSaid) return;
+  notifyDeniedSaid = true;
+  toast("Notifications are off for Pigeonhole: turn them on in System Settings → Notifications.", "error", {
+    label: "Open settings",
+    run: () => invoke("open_notification_settings"),
+  });
+}
+
+/// Asks macOS for permission at start (it shows its dialog only the first time).
+async function prepareNotifications() {
+  if (!(await invoke("prepare_notifications").catch(() => true))) notificationsOff();
+}
+
+function showNotification(title, body) {
+  return invoke("notify", { title, body }).catch((e) => {
+    if (String(e) === NOTIFY_DENIED) notificationsOff();
+    else console.error("notification failed", e);
+    throw e;
+  });
 }

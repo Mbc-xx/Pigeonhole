@@ -2283,7 +2283,7 @@ dependencies = [
 
 [[package]]
 name = "kanbanmail"
-version = "2.7.1"
+version = "2.7.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2294,6 +2294,7 @@ dependencies = [
  "objc2",
  "objc2-contacts",
  "objc2-foundation",
+ "objc2-user-notifications",
  "rfd",
  "serde",
  "serde_json",
@@ -2306,7 +2307,7 @@ dependencies = [
 
 [[package]]
 name = "kanbanmail-cli"
-version = "2.7.1"
+version = "2.7.2"
 dependencies = [
  "anyhow",
  "kanbanmail-core",
@@ -2316,7 +2317,7 @@ dependencies = [
 
 [[package]]
 name = "kanbanmail-core"
-version = "2.7.1"
+version = "2.7.2"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -3001,6 +3002,8 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.13.2",
+ "block2",
  "objc2",
  "objc2-foundation",
 ]

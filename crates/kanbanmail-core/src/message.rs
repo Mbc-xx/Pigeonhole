@@ -69,6 +69,8 @@ pub struct MessageView {
     pub attachments: Vec<AttachmentInfo>,
     /// A calendar invitation carried by the email, if any.
     pub invite: Option<Invite>,
+    /// How a draft of this app was written ("rich", "markdown", "plain").
+    pub draft_format: Option<String>,
 }
 
 /// A date-time from a calendar file: local wall time unless `utc`.
@@ -239,6 +241,7 @@ pub fn parse_view(raw: &[u8]) -> MessageView {
             html_main: None,
             text_main: None,
             attachments: Vec::new(),
+            draft_format: None,
         };
     };
     // Use HTML only if the message really has some: otherwise mail-parser
@@ -294,6 +297,10 @@ pub fn parse_view(raw: &[u8]) -> MessageView {
         has_remote_content: html.as_deref().is_some_and(has_remote_content),
         attachments: list_attachments(&m, raw_html.as_deref()),
         invite: find_invite(&m),
+        draft_format: m
+            .headers()
+            .get(crate::smtp::DRAFT_FORMAT_HEADER)
+            .map(|h| String::from_utf8_lossy(h.raw_value()).trim().to_string()),
         html,
     }
 }
@@ -378,7 +385,8 @@ fn has_remote_content(html: &str) -> bool {
 pub fn sanitize_signature(html: &str) -> String {
     ammonia::Builder::default()
         .url_schemes(["data", "mailto", "http", "https"].into_iter().collect())
-        .add_generic_attributes(["style", "align", "width", "height"])
+        // data-signature marks the signature block in drafts written in the editor.
+        .add_generic_attributes(["style", "align", "width", "height", "data-signature"])
         .link_rel(Some("noopener noreferrer"))
         .clean(html)
         .to_string()
@@ -389,7 +397,7 @@ pub fn sanitize_signature(html: &str) -> String {
 fn sanitize_html(html: &str) -> String {
     ammonia::Builder::default()
         .url_schemes(["data", "mailto", "http", "https", "cid"].into_iter().collect())
-        .add_generic_attributes(["style", "align", "bgcolor", "width", "height"])
+        .add_generic_attributes(["style", "align", "bgcolor", "width", "height", "data-signature"])
         .link_rel(Some("noopener noreferrer"))
         .clean(html)
         .to_string()
@@ -566,6 +574,33 @@ pub fn parse_ics(ics: &str) -> Option<Invite> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_rich_draft_comes_back_with_its_format_and_signature() {
+        let acc = crate::account::Account::new("mail.example.com".into(), "me@example.com".into());
+        let draft = crate::smtp::Draft {
+            to: "you@example.com".into(),
+            subject: "Hi".into(),
+            body: "Hello\n\n-- \nJane".into(),
+            html: Some("<p><b>Hello</b></p><div data-signature>-- <br><b style=\"color:#1f6feb\">Jane</b></div>".into()),
+            message_id: Some("<d1@example.com>".into()),
+            cc: String::new(),
+            bcc: String::new(),
+            in_reply_to: None,
+            references: Vec::new(),
+            markdown: false,
+            attachments: Vec::new(),
+            from: None,
+        };
+        let raw = crate::smtp::build_draft(&acc, &draft, None).unwrap().formatted();
+        let view = parse_view(&raw);
+        assert_eq!(view.draft_format.as_deref(), Some("rich"));
+        let html = view.html.unwrap();
+        assert!(html.contains("<b>Hello</b>") && html.contains("data-signature") && html.contains("color:#1f6feb"), "{html}");
+        let plain = crate::smtp::build_draft(&acc, &crate::smtp::Draft { html: None, ..draft }, None).unwrap().formatted();
+        assert_eq!(parse_view(&plain).draft_format.as_deref(), Some("plain"));
+    }
+
     use super::*;
 
     const SAMPLE: &[u8] = b"From: Anna <anna@example.com>\r\n\

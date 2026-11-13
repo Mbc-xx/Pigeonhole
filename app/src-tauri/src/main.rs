@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod contacts;
+mod notifications;
 
 use kanbanmail_core::{
     account::{self, Account, Provider, SentCopy},
@@ -1902,10 +1903,23 @@ fn save_board(columns: Vec<ColumnSpec>) -> CmdResult<()> {
 }
 
 /// A desktop notification (macOS asks for permission the first time).
+/// Runs off the main thread: the first time it waits for the user's answer.
 #[tauri::command]
-fn notify(title: String, body: String, app: AppHandle) -> CmdResult<()> {
-    use tauri_plugin_notification::NotificationExt;
-    app.notification().builder().title(title).body(body).show().map_err(|e| e.to_string())
+async fn notify(title: String, body: String, app: AppHandle) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || notifications::show(&app, &title, &body)).await.map_err(|e| e.to_string())?
+}
+
+/// Asks for permission to notify, when the app starts with notifications on.
+#[tauri::command]
+async fn prepare_notifications() -> bool {
+    tauri::async_runtime::spawn_blocking(notifications::prepare).await.unwrap_or(false)
+}
+
+/// Opens System Settings → Notifications.
+#[tauri::command]
+fn open_notification_settings() {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.Notifications-Settings.extension").spawn();
 }
 
 /// Answers a calendar invitation ("ACCEPTED", "DECLINED", "TENTATIVE") to its organizer.
@@ -2016,6 +2030,8 @@ fn main() {
             empty_folder,
             save_board,
             notify,
+            prepare_notifications,
+            open_notification_settings,
             respond_invite,
             add_to_calendar,
             render_markdown,
