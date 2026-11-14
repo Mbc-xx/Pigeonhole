@@ -74,6 +74,78 @@ function renderAttachments(folder, uid, list) {
 
 const IS_MAC = /Mac/.test(navigator.platform || navigator.userAgent);
 
+// ---------- people in an email: the contact menu ----------
+
+let readerSender = null; // { name, email } of the open email's sender
+
+/// Recipients as names: pointing shows the address, a click or right-click
+/// opens the contact menu.
+function renderPeople(target, text) {
+  target.replaceChildren();
+  parseAddresses(text || "").forEach((p, i) => {
+    if (i) target.append(", ");
+    const person = el("span", "person", p.name || p.email);
+    person.title = formatAddress(p);
+    contactMenuOn(person, () => p);
+    target.append(person);
+  });
+}
+
+function contactMenuOn(elem, who, extra = () => []) {
+  const open = (ev) => {
+    const p = who();
+    if (!p?.email) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    openContactMenu(ev.clientX, ev.clientY, p, extra());
+  };
+  elem.addEventListener("contextmenu", open);
+  elem.addEventListener("click", open);
+}
+contactMenuOn($("reader-from"), () => readerSender);
+contactMenuOn($("reader-from-address"), () => readerSender);
+contactMenuOn($("reader-avatar"), () => readerSender);
+
+/// What can be done with a person: write to them, find their emails, copy
+/// the address, see or add them in Contacts. `extra`: menu items to add.
+function openContactMenu(x, y, person, extra = []) {
+  const address = formatAddress(person);
+  const known = (state.contacts || []).some((c) => c.email.toLowerCase() === person.email.toLowerCase());
+  const run = (fn) => () => {
+    closeConvMenu();
+    fn();
+  };
+  popMenuAt(x, y, (menu) => {
+    menu.classList.add("contact-menu");
+    const head = el("div", "menu-head", person.name || person.email);
+    head.title = person.email;
+    menu.append(
+      head,
+      menuButton("compose", `New email to ${shortName(person.name) || person.email}`, run(() => openComposer({ to: address, body: signatureBlock() }))),
+      menuButton("search", "Emails from this person", run(() => startSearch(`from:${person.email}`))),
+      menuButton("envelope", "Copy the address", run(() => copyText(address).then(() => toast("Address copied", "info", null, 2), () => toast("Could not copy the address")))),
+    );
+    if (IS_MAC) menu.append(menuButton("plus", known ? "Show in Contacts" : "Add to Contacts", run(() => showInContacts(person))));
+    if (extra.length) menu.append(el("div", "menu-sep"), ...extra);
+  });
+}
+
+/// Opens the person in Contacts, after adding them when they are not there.
+async function showInContacts(person) {
+  try {
+    const created = await invoke("open_contact", { name: person.name || "", email: person.email });
+    if (created) {
+      toast(`${person.name || person.email} added to Contacts`, "info");
+      // Suggestions and "Important only" know them at once.
+      state.contacts = [...(state.contacts || []), { name: person.name || "", email: person.email }];
+    }
+  } catch (e) {
+    if (String(e).includes("not allowed Pigeonhole")) {
+      toast(String(e), "error", { label: "Open settings", run: () => invoke("open_contacts_privacy").catch(() => {}) });
+    } else toast(String(e));
+  }
+}
+
 /// "Saved in Downloads" (the folder only; the full path when pointing at
 /// it), with a button that shows the file in its folder.
 function savedToast(what, path) {
@@ -297,6 +369,7 @@ async function openReader(folder, card, opts = {}) {
   renderReaderDraft();
   $("reader-from").textContent = card.from || "(unknown sender)";
   $("reader-from-address").textContent = card.from_address && card.from_address !== card.from ? card.from_address : "";
+  readerSender = { name: card.from && card.from !== card.from_address ? card.from : "", email: card.from_address || "" };
   setAvatar($("reader-avatar"), card.from || card.from_address || "?");
   $("reader-to").textContent = "";
   $("reader-cc").textContent = "";
@@ -314,8 +387,8 @@ async function openReader(folder, card, opts = {}) {
     readerMessage = msg;
     $("reader-subject").textContent = msg.subject || "(no subject)";
     $("reader-from").textContent = msg.from;
-    $("reader-to").textContent = msg.to;
-    $("reader-cc").textContent = msg.cc;
+    renderPeople($("reader-to"), msg.to);
+    renderPeople($("reader-cc"), msg.cc);
     $("reader-cc").hidden = $("reader-cc-label").hidden = !msg.cc;
     $("reader-reply").disabled = $("reader-reply-all").disabled = false;
     if (readerCard?.card === card) startSeenTimer(folder, card);

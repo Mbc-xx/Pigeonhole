@@ -87,6 +87,10 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   in a week (reader button, right-click menu or Z). It waits in a "Snoozed"
   folder, shows when it comes back, and returns where it was while the app is
   open; a click on its tag brings it back at once.
+- People: in an open email, click or right-click the sender or a recipient (and
+  right-click a recipient while writing) for a menu: new email to them, their
+  emails, copy the address, and on macOS add them to Contacts or show them there
+  to edit. Minimized emails sit at the bottom right with a border in the theme's color.
 - Keyboard: ↑ ↓ (or J K) move between emails, ← → between columns, Enter opens;
   E archives, ⌫ deletes, R / A / F reply, reply all and forward, U read or
   unread, P pins, M moves (type to find the folder), Z snoozes, N writes a new

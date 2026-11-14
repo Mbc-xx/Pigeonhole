@@ -465,10 +465,10 @@ span.draft-tag { cursor: default; }
 .in-pane #reader-minimize { display: none; }
 .reader-dock { position: fixed; right: 16px; bottom: 0; z-index: 15; display: flex; flex-direction: row-reverse; gap: 8px; max-width: calc(100vw - 32px); }
 body:has(#composer.minimized:not([hidden])) .reader-dock { right: 352px; max-width: calc(100vw - 368px); }
-.reader-bar { display: flex; align-items: center; gap: 4px; flex: 0 1 220px; min-width: 0; padding: 4px 6px 4px 12px; border: var(--hairline) solid var(--edge); border-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0; background: var(--card); box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.25); }
+.reader-bar { display: flex; align-items: center; gap: 4px; flex: 0 1 220px; min-width: 0; padding: 4px 6px 4px 12px; border: 2px solid var(--accent); border-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0; background: var(--card); box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.25); }
 .reader-bar-open { flex: 1; min-width: 0; padding: 4px 0; overflow: hidden; border: 0; background: transparent; color: var(--text); font-size: 13px; font-weight: 600; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 #composer.minimized { inset: auto 16px 0 auto; padding: 0; background: none; backdrop-filter: none; z-index: 25; }
-#composer.minimized .composer { width: 320px; height: auto; border-radius: var(--r-m) var(--r-m) 0 0; box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.3); }
+#composer.minimized .composer { width: 320px; height: auto; border-radius: var(--r-m) var(--r-m) 0 0; box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.3); border: 2px solid var(--accent); border-bottom: 0; }
 #composer.minimized .composer > :not(.reader-head) { display: none; }
 #composer.minimized .reader-head { padding: 8px 8px 8px 14px; align-items: center; cursor: pointer; }
 #composer.minimized .reader-head h2 { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1230,3 +1230,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 /* Snoozed emails: when they come back. */
 .snooze-tag { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-ink); font-weight: 600; cursor: pointer; }
 .conv-menu .menu-items { display: flex; flex-direction: column; }
+/* Minimized emails: a strip of the accent color on top, to find them at a glance. */
+.reader-bar, #composer.minimized .composer { background-image: linear-gradient(var(--accent-soft), var(--accent-soft)); }
+/* People in an open email: a click opens the contact menu. */
+.person, #reader-from, #reader-from-address { cursor: pointer; border-radius: 3px; }
+.person:hover, #reader-from:hover, #reader-from-address:hover { text-decoration: underline; text-decoration-color: var(--accent); }

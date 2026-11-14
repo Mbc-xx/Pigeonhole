@@ -1909,6 +1909,12 @@ async fn notify(title: String, body: String, app: AppHandle) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || notifications::show(&app, &title, &body)).await.map_err(|e| e.to_string())?
 }
 
+/// Shows (or creates, then shows) the contact of an address in Contacts.
+#[tauri::command]
+async fn open_contact(name: String, email: String) -> CmdResult<bool> {
+    tauri::async_runtime::spawn_blocking(move || contacts::open_contact(&name, &email)).await.map_err(|e| e.to_string())?
+}
+
 /// Asks for permission to notify, when the app starts with notifications on.
 #[tauri::command]
 async fn prepare_notifications() -> bool {
@@ -2031,6 +2037,7 @@ fn main() {
             save_board,
             notify,
             prepare_notifications,
+            open_contact,
             open_notification_settings,
             respond_invite,
             add_to_calendar,

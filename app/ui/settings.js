@@ -980,6 +980,21 @@ function renderChips(id) {
       chip.classList.toggle("selected", ev.metaKey || ev.ctrlKey || ev.shiftKey ? !chip.classList.contains("selected") : true);
       input.focus();
     });
+    // Right-click: the contact menu, with editing and removing the recipient.
+    chip.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openContactMenu(ev.clientX, ev.clientY, r, [
+        menuButton("compose", "Edit name and address", () => {
+          closeConvMenu();
+          editChip(id, chip, r);
+        }),
+        menuButton("close", "Remove", () => {
+          closeConvMenu();
+          removeRecipients(id, [r]);
+        }),
+      ]);
+    });
     chip.addEventListener("dblclick", (ev) => {
       ev.stopPropagation();
       editChip(id, chip, r);
