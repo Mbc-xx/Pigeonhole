@@ -79,6 +79,81 @@ pub fn system_contacts() -> Result<Vec<Contact>, String> {
     }
 }
 
+/// Shows the contact with this address in the Contacts app, creating it
+/// first (with the name split into first and last) when there is none.
+/// Returns true when it was created. Call it off the main thread.
+#[cfg(target_os = "macos")]
+pub fn open_contact(name: &str, email: &str) -> Result<bool, String> {
+    use block2::RcBlock;
+    use objc2::runtime::{Bool, ProtocolObject};
+    use objc2_contacts::{
+        CNAuthorizationStatus, CNContact, CNContactEmailAddressesKey, CNContactStore, CNEntityType, CNKeyDescriptor, CNLabelWork, CNLabeledValue,
+        CNMutableContact, CNSaveRequest,
+    };
+    use objc2_foundation::{NSArray, NSError, NSString};
+
+    let email = email.trim();
+    if !email.contains('@') {
+        return Err("not an email address".into());
+    }
+    unsafe {
+        let store = CNContactStore::new();
+        if CNContactStore::authorizationStatusForEntityType(CNEntityType::Contacts) == CNAuthorizationStatus::NotDetermined {
+            let (answered, answer) = std::sync::mpsc::channel();
+            let done = RcBlock::new(move |_granted: Bool, _error: *mut NSError| {
+                let _ = answered.send(());
+            });
+            store.requestAccessForEntityType_completionHandler(CNEntityType::Contacts, &done);
+            drop(done);
+            let _ = answer.recv();
+        }
+        let denied = || {
+            let status = CNContactStore::authorizationStatusForEntityType(CNEntityType::Contacts);
+            status == CNAuthorizationStatus::Denied || status == CNAuthorizationStatus::Restricted
+        };
+        let keys: [&ProtocolObject<dyn CNKeyDescriptor>; 1] = [ProtocolObject::from_ref(CNContactEmailAddressesKey)];
+        let keys = NSArray::from_slice(&keys);
+        let predicate = CNContact::predicateForContactsMatchingEmailAddress(&NSString::from_str(email));
+        let found = match store.unifiedContactsMatchingPredicate_keysToFetch_error(&predicate, &keys) {
+            Ok(list) => list.firstObject().map(|c| c.identifier().to_string()),
+            Err(_) if denied() => return Err(DENIED.into()),
+            Err(e) => return Err(format!("Reading Contacts failed: {}", e.localizedDescription())),
+        };
+        let (identifier, created) = match found {
+            Some(id) => (id, false),
+            None => {
+                let contact = CNMutableContact::new();
+                let name = name.trim();
+                let name = if name.eq_ignore_ascii_case(email) { "" } else { name };
+                match name.rsplit_once(' ') {
+                    Some((first, last)) => {
+                        contact.setGivenName(&NSString::from_str(first.trim()));
+                        contact.setFamilyName(&NSString::from_str(last.trim()));
+                    }
+                    None => contact.setGivenName(&NSString::from_str(name)),
+                }
+                let value = NSString::from_str(email);
+                let labeled = CNLabeledValue::<NSString>::labeledValueWithLabel_value(Some(CNLabelWork), &value);
+                contact.setEmailAddresses(&NSArray::from_retained_slice(&[labeled]));
+                let request = CNSaveRequest::new();
+                request.addContact_toContainerWithIdentifier(&contact, None);
+                match store.executeSaveRequest_error(&request) {
+                    Ok(()) => (contact.identifier().to_string(), true),
+                    Err(_) if denied() => return Err(DENIED.into()),
+                    Err(e) => return Err(format!("Saving the contact failed: {}", e.localizedDescription())),
+                }
+            }
+        };
+        let _ = std::process::Command::new("open").arg(format!("addressbook://{identifier}")).spawn();
+        Ok(created)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn open_contact(_name: &str, _email: &str) -> Result<bool, String> {
+    Err("Contacts are available on macOS only".into())
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn system_contacts() -> Result<Vec<Contact>, String> {
     Ok(Vec::new())

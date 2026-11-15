@@ -80,10 +80,45 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   you choose (off by default), to Archive or to a folder of yours such as "Done
   archive" (created if missing). Pinned and unread emails stay; it happens while
   the app is open, with Undo.
+- Today, in the top bar: how many to-dos are late, how many answers arrived in
+  Waiting and how many drafts are not sent; a click shows the column or Drafts.
+  A notification also tells you when an answer arrives to an email you wait on.
+- Snooze: put an email aside until later today, tomorrow or Monday morning, or
+  in a week (reader button, right-click menu or Z). It waits in a "Snoozed"
+  folder, shows when it comes back, and returns where it was while the app is
+  open; a click on its tag brings it back at once.
+- Fewer waits: pointing at an email for a moment starts downloading it, so the
+  click opens it at once. Optionally (Settings → Reading), archiving, deleting,
+  moving or snoozing the open email opens the next one instead of the list.
+- Quick reply: the Quick reply button (or ⌘↓) opens a field under the open
+  email that answers its sender without opening the editor; it stays closed
+  until asked for, and Esc puts it away (⌘↵ sends, with signature, quote and the usual Undo); "Open in
+  editor" carries on with formatting, attachments and recipients.
+- Saved replies: texts written once in Settings → Writing and put in an email
+  with "Saved replies" while writing, or in a quick reply.
+- Clicking a notification brings Pigeonhole forward on that email (or on the
+  Inbox when several arrived).
+- Unsubscribe: newsletters and mailing lists that say how to leave get an
+  Unsubscribe button in the reader; with one click when the list allows it,
+  otherwise its page or a prepared email.
+- Attachments: the eye (or space on a selected attachment) previews it without
+  saving, with Quick Look on macOS.
+- People: in an open email, click or right-click the sender or a recipient (and
+  right-click a recipient while writing) for a menu: new email to them, their
+  emails, copy the address, and on macOS add them to Contacts or show them there
+  to edit. Minimized emails sit at the bottom right with a border in the theme's color.
+- Keyboard: ↑ ↓ (or J K) move between emails, ← → between columns, Enter opens;
+  E archives, ⌫ deletes, R / A / F reply, reply all and forward, U read or
+  unread, P pins, M moves (type to find the folder), Z snoozes, N writes a new
+  email; ? lists them all. With an email open, ↑ ↓ read the previous or next one.
+  The outline of the picked email goes away with a click anywhere or Esc.
 - Board columns are edited from the settings (add, rename, drag to reorder,
   remove; type a new folder name to create it).
 - "Load more" at the bottom of a column or folder for older emails.
-- macOS notifications for new Inbox emails: only important ones, all, or off.
+- macOS notifications for new Inbox emails: only important ones, all, or off. macOS
+  asks for permission the first time; Settings → Reading has "Send a test
+  notification", and if they are turned off the app offers to open System
+  Settings → Notifications.
 - Multiple selection: ⌘/Ctrl-click or Shift-click cards (or "Select" in the
   right-click menu), then Archive, Delete, Spam, Read, Unread, Pin or Move… from
   the bar at the bottom or the right-click menu, or drag them together.
@@ -126,7 +161,7 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   opened the email): load them per email with "Load images", or always from
   the settings. Inline images embedded in the email are always shown.
 - Attachments listed in the reader with their size; click one to save it to
-  the folder you choose (Settings → Reading: ask every time, Downloads or a folder of yours). Cards with attachments
+  the folder you choose (Settings → Reading: ask every time, Downloads or a folder of yours), then "Show in Finder" opens its folder; or drag it straight to a folder, the desktop or another app. Cards with attachments
   show a paperclip.
 - Sidebar with "New email", the "Important only" and "Unread only" filters (as
   icons with their counts) and every folder (Trash, Sent, Junk, subfolders…)
@@ -149,7 +184,9 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - Several accounts: a row of badges in the top bar
   shows every account with its unread Inbox emails and adds new ones; label, icon and color are chosen in Settings → Account. The same address can be connected twice on different servers, for example when a domain signs in at Microsoft but keeps its mail elsewhere. Each account has its own board, signatures, senders,
   rules and Waiting column; appearance and behavior are shared (the theme too, unless "Each account has its own theme" is on in Settings → Appearance). Only the account
-  in use is followed. iCloud, Gmail and Microsoft have their own choice on the
+  in use is followed. The connection of the account just left, and of the ones whose
+  unread emails are counted in the top bar, is kept for ten minutes: moving to them
+  needs no new login. iCloud, Gmail and Microsoft have their own choice on the
   login screen: see [Mail services](#mail-services).
 - "All Mail" in the sidebar: the 200 most recent emails of every folder (Trash,
   Junk and Drafts too) in one list, each tagged with its folder; a conversation
@@ -161,7 +198,8 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
   follow; the sidebar has a Tasks tab beside Folders, with a field to find a task, and
   a click shows all the emails of one. The links
   stay on your computer, in a file beside the settings, and are part of the exported settings.
-- Move to… lists: the folders offered are chosen apart from the sidebar, one tick per
+- Move to… lists start with a field to find a folder by name (Enter takes the
+  first). The folders offered are chosen apart from the sidebar, one tick per
   folder or copied from it (Settings → Folders); "All folders…" shows the others when needed.
 - Sidebar folders: choose which ones to show, drag them into your order and pick a color
   (Settings → Folders). The color also marks the board column and the folder
@@ -266,7 +304,12 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 - Drafts: while writing, the email is saved to the Drafts folder every 15
   seconds (only when it changed). Closing the composer keeps the draft;
   "Discard" deletes it; sending removes it. Click a card in Drafts to keep
-  writing it. Only the latest version is kept on the server.
+  writing it, in the editor it was written in (plain, Markdown or visual, with its
+  formatting and rich signature). Only the latest version is kept on the server. The Drafts
+  counter in the sidebar counts every draft, not only unread ones. A reply
+  left in Drafts is hard to miss: its conversation shows "✎ Draft reply · not
+  sent" on the board and in the lists, the open email has a banner with "Open
+  the draft", and inside the conversation the draft is marked in red.
 - Address suggestions while writing: from the senders of loaded emails and,
   if enabled, from the system address book (macOS Contacts only for now;
   macOS asks for permission the first time).
@@ -283,7 +326,9 @@ accounts and data. Internal names such as the `kanbanmail-core` crate and the
 crates/kanbanmail-core   shared logic: account, board, keychain, IMAP, SMTP, MIME parsing
 crates/kanbanmail-cli    command-line test tool
 app/src-tauri            desktop app (Tauri backend)
-app/ui                   user interface (HTML/CSS/JS, no external libraries)
+app/ui                   user interface (HTML/CSS/JS, no external libraries): app.js,
+                         board.js, organize.js, reader.js, compose.js, settings.js,
+                         loaded in this order and sharing one scope
 ```
 
 ## Running the app

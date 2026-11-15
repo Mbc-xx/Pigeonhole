@@ -104,6 +104,13 @@ pub struct Settings {
     /// Where emails are read and written: "light", "dark" or "theme".
     #[serde(default = "default_mail_surface")]
     pub mail_surface: String,
+    /// Texts written once and put in emails with a click ("Saved replies").
+    #[serde(default)]
+    pub templates: Vec<Template>,
+    /// After archiving, deleting, moving or snoozing the open email: "next"
+    /// opens the next one of the list, "list" goes back to the list.
+    #[serde(default = "default_after_action")]
+    pub after_action: String,
     /// Each account keeps its own theme and email background; otherwise
     /// they are the same for every account.
     #[serde(default)]
@@ -182,8 +189,16 @@ fn default_preview_list() -> u32 {
     1
 }
 
+/// The settings file read last: its path, (modified time, size) and content.
+type Loaded = Option<(std::path::PathBuf, (Option<std::time::SystemTime>, u64), Settings)>;
+static LOADED: std::sync::Mutex<Loaded> = std::sync::Mutex::new(None);
+
 fn default_waiting_days() -> u32 {
     3
+}
+
+fn default_after_action() -> String {
+    "list".into()
 }
 
 fn default_todo_days() -> u32 {
@@ -225,6 +240,13 @@ pub struct Rule {
     pub field: String,
     pub contains: String,
     pub folder: String,
+}
+
+/// A saved reply: a short name to find it, and its text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Template {
+    pub name: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,6 +313,8 @@ impl Default for Settings {
             compact_actions: true,
             mail_surface: default_mail_surface(),
             theme_per_account: false,
+            after_action: default_after_action(),
+            templates: Vec::new(),
             save_folder: default_save_folder(),
             ask_conversation: true,
             senders: Vec::new(),
@@ -336,11 +360,19 @@ impl Settings {
 
     pub fn load_from(dir: &Path) -> Result<Settings> {
         let path = dir.join("settings.toml");
-        if !path.exists() {
-            return Ok(Settings::default());
+        let Ok(meta) = std::fs::metadata(&path) else { return Ok(Settings::default()) };
+        // Read often (every send, every background round): parsed again only
+        // when the file changed.
+        let stamp = (meta.modified().ok(), meta.len());
+        if let Some((p, s, settings)) = LOADED.lock().unwrap().as_ref() {
+            if *p == path && *s == stamp {
+                return Ok(settings.clone());
+            }
         }
         let text = std::fs::read_to_string(&path)?;
-        toml::from_str(&text).with_context(|| format!("invalid {}", path.display()))
+        let settings: Settings = toml::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
+        *LOADED.lock().unwrap() = Some((path, stamp, settings.clone()));
+        Ok(settings)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -350,6 +382,8 @@ impl Settings {
     fn save_to(&self, dir: &Path) -> Result<()> {
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("settings.toml"), toml::to_string_pretty(self)?)?;
+        // The next load reads what was just written, whatever the clock says.
+        *LOADED.lock().unwrap() = None;
         Ok(())
     }
 
@@ -376,6 +410,8 @@ impl Settings {
             theme_per_account: from.theme_per_account,
             save_folder: from.save_folder.clone(),
             ask_conversation: from.ask_conversation,
+            after_action: from.after_action.clone(),
+            templates: from.templates.clone(),
             ..self
         }
     }

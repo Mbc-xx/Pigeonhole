@@ -91,6 +91,7 @@
       <button id="toggle-sidebar" class="icon-btn" title="Expand/collapse the sidebar (Ctrl/⌘+B)"><svg class="icon"><use href="#i-sidebar"/></svg></button>
       <nav id="account-rail" class="account-rail" aria-label="Accounts"></nav>
       <div id="sync" class="sync" data-level="busy"><span class="sync-light"></span><span id="sync-status" class="muted"></span></div>
+      <div id="today" class="today" hidden></div>
       <div class="spacer"></div>
       <div class="search-box">
         <svg class="icon"><use href="#i-search"/></svg>
@@ -165,10 +166,12 @@
             <dt>To</dt><dd id="reader-to"></dd>
             <dt id="reader-cc-label">Cc</dt><dd id="reader-cc"></dd>
           </dl>
+          <div id="reader-draft" class="reader-draft" hidden></div>
           <div id="reader-tasks" class="reader-tasks" hidden></div>
           <!-- Actions on this email only -->
           <div class="reader-actions">
             <button id="reader-reply" title="Reply"><svg class="icon"><use href="#i-reply"/></svg><span>Reply</span></button>
+            <button id="reader-quick" title="Quick reply under the email (⌘↓)" hidden><svg class="icon"><use href="#i-compose"/></svg><span>Quick reply</span></button>
             <button id="reader-reply-all" title="Reply all"><svg class="icon"><use href="#i-reply-all"/></svg><span>Reply all</span></button>
             <button id="reader-forward" title="Forward"><svg class="icon"><use href="#i-forward"/></svg><span>Forward</span></button>
             <span class="action-gap"></span>
@@ -178,12 +181,14 @@
             <button id="reader-trash" title="Delete this email (move to trash)"><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
             <button id="reader-spam" title="Move to Junk"><svg class="icon"><use href="#i-junk"/></svg><span>Spam</span></button>
             <button id="reader-move" title="Move this email to a folder…"><svg class="icon"><use href="#i-folder"/></svg><span>Move</span></button>
+            <button id="reader-snooze" title="Snooze: put it aside until later (Z)"><svg class="icon"><use href="#i-calendar"/></svg><span>Snooze</span></button>
             <button id="reader-task" title="Link this email to a task (Jira and the like)…"><svg class="icon"><use href="#i-link"/></svg><span>Task</span></button>
             <span id="reader-seen-hint" class="muted"></span>
           </div>
           <div class="reader-sender">
             <span id="sender-why" class="muted"></span>
             <span class="spacer"></span>
+            <button id="reader-unsubscribe" hidden title="Leave this mailing list or newsletter">Unsubscribe</button>
             <button id="rule-allow" title="Always show this sender with Important only">Always important</button>
             <button id="rule-block" title="Never show this sender with Important only">Never important</button>
             <select id="rule-scope" title="Apply the rule to the address or to the whole domain">
@@ -215,6 +220,15 @@
             <button id="reader-toggle" hidden></button>
           </div>
           <div id="reader-body" class="reader-body"></div>
+          <div id="quick-reply" class="quick-reply" hidden>
+            <textarea id="quick-reply-text" rows="2" spellcheck="true"></textarea>
+            <div class="quick-reply-bar">
+              <button type="button" id="quick-reply-templates" class="icon-btn" title="Saved replies"><svg class="icon"><use href="#i-list"/></svg></button>
+              <span class="spacer"></span>
+              <button type="button" id="quick-reply-open" title="Continue in the full editor (formatting, attachments, recipients)">Open in editor</button>
+              <button type="button" id="quick-reply-send" class="primary" title="Send the reply (⌘↵)">Send</button>
+            </div>
+          </div>
         </section>
         <div id="thread-after" class="thread" hidden></div>
         <div id="reader-spacer" aria-hidden="true"></div>
@@ -238,6 +252,7 @@
       </div>
       <div class="compose-tools">
         <button type="button" id="compose-attach" title="Attach files (or drop them here)"><svg class="icon"><use href="#i-paperclip"/></svg><span>Attach</span></button>
+        <button type="button" id="compose-templates" title="Put in a saved reply"><svg class="icon"><use href="#i-list"/></svg><span>Saved replies</span></button>
         <div class="segmented" role="radiogroup" aria-label="Format">
           <button type="button" id="fmt-plain" role="radio">Plain</button>
           <button type="button" id="fmt-md" role="radio" title="**bold**, *italic*, lists, [links](https://…), tables and inline HTML">Markdown</button>
@@ -530,6 +545,10 @@
             </select>
           </label>
           <p class="muted small">After "Send" the email waits this long with an "Undo" button, which brings it back to the composer. If the app is closed in the meantime, the email stays in Drafts.</p>
+          <h3 class="settings-sub">Saved replies</h3>
+          <p class="muted small">Texts written once and put in an email with “Saved replies” while writing, or in a quick reply. Drag to reorder.</p>
+          <div id="template-prefs" class="rule-prefs"></div>
+          <div class="settings-buttons"><button type="button" id="add-template">+ Add a saved reply</button></div>
           <label class="toggle"><input id="set-contacts" type="checkbox"> Suggest addresses from the address book (macOS Contacts)</label>
           <div class="contacts-status">
             <span id="contacts-status" class="muted small"></span>
@@ -590,6 +609,12 @@
               <option value="30">30 seconds</option>
             </select>
           </label>
+          <label>After archiving, deleting, moving or snoozing the open email
+            <select id="set-after-action">
+              <option value="list">Go back to the list</option>
+              <option value="next">Open the next email</option>
+            </select>
+          </label>
           <label class="toggle"><input id="set-ask-conv" type="checkbox"> In a conversation, ask whether to archive, delete or move only the open email or all of them</label>
           <label>Notifications for new Inbox emails
             <select id="set-notify">
@@ -598,6 +623,7 @@
               <option value="off">Off</option>
             </select>
           </label>
+          <div class="settings-buttons"><button type="button" id="test-notification">Send a test notification</button><span id="notify-state" class="muted small"></span></div>
           <label class="toggle"><input id="set-group" type="checkbox"> Group emails by conversation in the board and folder lists</label>
           <p class="muted small">One card per conversation, showing its latest email, the people involved and how many emails it has. Archive, delete, pin and drag act on the whole conversation.</p>
           <label class="toggle"><input id="set-remote" type="checkbox"> Always load remote images</label>
@@ -654,5 +680,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="app.js"></script>
+  <script src="board.js"></script>
+  <script src="organize.js"></script>
+  <script src="reader.js"></script>
+  <script src="compose.js"></script>
+  <script src="settings.js"></script>
 </body>
 </html>

@@ -8,5 +8,6 @@ pub mod oauth;
 pub mod secret;
 pub mod settings;
 pub mod smtp;
+pub mod snooze;
 pub mod store;
 pub mod tasks;

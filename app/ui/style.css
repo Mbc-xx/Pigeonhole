@@ -366,6 +366,17 @@ button.primary:hover { background: var(--accent); filter: brightness(1.08); }
 .task-tag:hover { filter: brightness(0.95); }
 .task-tag .icon { width: 11px; height: 11px; flex-shrink: 0; }
 .task-tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A reply still in Drafts: hard to miss, since it looks like one sent. */
+.draft-tag { background: color-mix(in srgb, #dc2626 16%, transparent); color: #c62828; font-weight: 600; cursor: pointer; }
+:root[data-theme="dark"] .draft-tag, :root[data-theme="ocean"] .draft-tag, :root[data-theme="forest"] .draft-tag, :root[data-theme="midnight"] .draft-tag, :root[data-custom-mode="dark"] .draft-tag { color: #f87171; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) .draft-tag { color: #f87171; } }
+span.draft-tag { cursor: default; }
+.reader-draft { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 8px; padding: 8px 12px; border-radius: var(--r-m); border: var(--hairline) solid color-mix(in srgb, #dc2626 45%, transparent); background: color-mix(in srgb, #dc2626 10%, transparent); font-size: 13px; }
+.reader-draft[hidden] { display: none; }
+.reader-draft span { flex: 1; min-width: 200px; }
+.reader-draft button { font-weight: 600; }
+.thread-row.draft { border-left: 3px solid #dc2626; background: color-mix(in srgb, #dc2626 7%, transparent); }
+.thread-row .draft-avatar { background: #dc2626; color: #fff; }
 .reader-tasks { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
 .conv-menu.task-menu { min-width: 260px; }
 .conv-menu .menu-input {
@@ -454,10 +465,10 @@ button.primary:hover { background: var(--accent); filter: brightness(1.08); }
 .in-pane #reader-minimize { display: none; }
 .reader-dock { position: fixed; right: 16px; bottom: 0; z-index: 15; display: flex; flex-direction: row-reverse; gap: 8px; max-width: calc(100vw - 32px); }
 body:has(#composer.minimized:not([hidden])) .reader-dock { right: 352px; max-width: calc(100vw - 368px); }
-.reader-bar { display: flex; align-items: center; gap: 4px; flex: 0 1 220px; min-width: 0; padding: 4px 6px 4px 12px; border: var(--hairline) solid var(--edge); border-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0; background: var(--card); box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.25); }
+.reader-bar { display: flex; align-items: center; gap: 4px; flex: 0 1 220px; min-width: 0; padding: 4px 6px 4px 12px; border: 2px solid var(--accent); border-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0; background: var(--card); box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.25); }
 .reader-bar-open { flex: 1; min-width: 0; padding: 4px 0; overflow: hidden; border: 0; background: transparent; color: var(--text); font-size: 13px; font-weight: 600; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 #composer.minimized { inset: auto 16px 0 auto; padding: 0; background: none; backdrop-filter: none; z-index: 25; }
-#composer.minimized .composer { width: 320px; height: auto; border-radius: var(--r-m) var(--r-m) 0 0; box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.3); }
+#composer.minimized .composer { width: 320px; height: auto; border-radius: var(--r-m) var(--r-m) 0 0; box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.3); border: 2px solid var(--accent); border-bottom: 0; }
 #composer.minimized .composer > :not(.reader-head) { display: none; }
 #composer.minimized .reader-head { padding: 8px 8px 8px 14px; align-items: center; cursor: pointer; }
 #composer.minimized .reader-head h2 { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -559,6 +570,8 @@ body:has(#composer.minimized:not([hidden])) .reader-dock { right: 352px; max-wid
 .attachment .att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment .att-dl { color: var(--muted); }
 .attachment:hover .att-dl { color: var(--accent); }
+.attachment .att-preview { display: inline-flex; padding: 2px; border-radius: 4px; color: var(--muted); }
+.attachment .att-preview:hover { color: var(--accent); background: var(--hover); }
 .reader-body { overflow: hidden; border-radius: 0 0 var(--r-m) var(--r-m); background: var(--mail-bg); }
 .reader-body pre {
   margin: 0;
@@ -1168,6 +1181,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .toast.wide { padding: 12px 18px; font-weight: 600; }
 .toast button { background: rgba(255, 255, 255, 0.18); color: #fff; border-color: rgba(255, 255, 255, 0.5); font-weight: 600; padding: 3px 10px; }
 .toast button:hover { background: rgba(255, 255, 255, 0.3); border-color: #fff; }
+/* The one thing to do next, in the toast's own color turned around. */
+.toast button.toast-primary { background: #fff; color: var(--accent); border-color: #fff; }
+.toast button.toast-primary:hover { background: rgba(255, 255, 255, 0.88); }
 .toast .toast-close { padding: 2px; margin-right: -6px; border: 0; background: none; }
 .toast .toast-close .icon { width: 14px; height: 14px; }
 
@@ -1197,3 +1213,41 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 /* Questions can have several paragraphs (a link's full address, for one). */
 #dialog-message { white-space: pre-line; overflow-wrap: anywhere; }
+/* An attachment being dragged out to a folder. */
+.attachment.dragging-out { opacity: 0.55; }
+/* The card picked with the arrow keys. */
+.card.kbd-focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Today: what needs a look, in the top bar. */
+.today { display: flex; gap: 6px; flex-shrink: 0; }
+.today[hidden] { display: none; }
+.today-chip { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 11px; border: 0; cursor: pointer; white-space: nowrap; }
+.today-chip.late { background: color-mix(in srgb, var(--pin) 18%, transparent); color: var(--pin); }
+.today-chip.replied { background: color-mix(in srgb, #1f9d55 18%, transparent); color: #1b8a4a; }
+.today-chip.draft { background: color-mix(in srgb, #dc2626 16%, transparent); color: #c62828; }
+:root[data-theme="dark"] .today-chip.replied, :root[data-theme="ocean"] .today-chip.replied, :root[data-theme="forest"] .today-chip.replied, :root[data-theme="midnight"] .today-chip.replied, :root[data-custom-mode="dark"] .today-chip.replied { color: #4ade80; }
+:root[data-theme="dark"] .today-chip.draft, :root[data-theme="ocean"] .today-chip.draft, :root[data-theme="forest"] .today-chip.draft, :root[data-theme="midnight"] .today-chip.draft, :root[data-custom-mode="dark"] .today-chip.draft { color: #f87171; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) .today-chip.replied { color: #4ade80; } :root:not([data-theme]) .today-chip.draft { color: #f87171; } }
+.column.flash { animation: column-flash 1.2s ease-out; }
+@keyframes column-flash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* Snoozed emails: when they come back. */
+.snooze-tag { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-ink); font-weight: 600; cursor: pointer; }
+.conv-menu .menu-items { display: flex; flex-direction: column; }
+/* Minimized emails: a strip of the accent color on top, to find them at a glance. */
+.reader-bar, #composer.minimized .composer { background-image: linear-gradient(var(--accent-soft), var(--accent-soft)); }
+/* People in an open email: a click opens the contact menu. */
+.person, #reader-from, #reader-from-address { cursor: pointer; border-radius: 3px; }
+.person:hover, #reader-from:hover, #reader-from-address:hover { text-decoration: underline; text-decoration-color: var(--accent); }
+/* Quick reply under the open email. */
+.quick-reply { margin: 10px 0 2px; padding: 8px; border: var(--hairline) solid var(--edge); border-radius: var(--r-m); background: var(--panel); }
+.quick-reply[hidden] { display: none; }
+.quick-reply textarea { display: block; width: 100%; box-sizing: border-box; resize: vertical; min-height: 44px; font: inherit; font-size: 14px; padding: 6px 8px; color: var(--text); background: var(--field); border: var(--hairline) solid var(--edge); border-radius: var(--r-s); }
+.quick-reply textarea:focus { outline: none; border-color: var(--accent); }
+.quick-reply-bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+/* Saved replies in the settings. */
+.template-pref { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: start; padding: 6px; border-radius: var(--r-s); cursor: grab; }
+.template-pref:hover { background: var(--panel); }
+.template-fields { display: flex; flex-direction: column; gap: 4px; }
+.template-pref input, .template-pref textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; }
+.template-pref.dragging { opacity: 0.4; }
+.template-pref.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+.template-pref.drop-after { box-shadow: 0 2px 0 var(--accent); }
