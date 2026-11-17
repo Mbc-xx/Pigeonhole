@@ -476,7 +476,17 @@ async fn count_other_account(id: &str, state: &AppState) -> Option<u32> {
                 (s, caps)
             }
         };
-        let unread = imap::folder_unseen(&mut session, "INBOX").await?;
+        // Counting important emails needs the senders you know, which only the
+        // open account has: here the server counts those with you in To.
+        // Shared preferences from these settings, addresses from that account's.
+        let to = match Settings::load() {
+            Ok(s) if s.only_to_me && s.count_unread == "important" => {
+                let own = account::dir_of(&id).ok().flatten().and_then(|d| Settings::load_from(&d).ok()).unwrap_or_default();
+                Settings { only_to_me: true, ..own }.to_me(&account.email)
+            }
+            _ => Vec::new(),
+        };
+        let unread = imap::folder_unseen(&mut session, "INBOX", &to).await?;
         Ok::<_, anyhow::Error>((unread, session, caps))
     };
     let (unread, session, caps) = tokio::time::timeout(OPERATION_TIMEOUT, check).await.ok()?.ok()?;
@@ -1696,7 +1706,7 @@ async fn folder_unseen(folders: Vec<String>, state: State<'_, AppState>) -> CmdR
             if imap::find_special_folder(s, "drafts").await?.as_deref() == Some(folder.as_str()) {
                 imap::folder_total(s, &folder).await
             } else {
-                imap::folder_unseen(s, &folder).await
+                imap::folder_unseen(s, &folder, &[]).await
             }
         })?;
         counts.insert(folder, count);
