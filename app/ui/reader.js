@@ -297,7 +297,7 @@ function startSeenTimer(folder, card) {
   if (card.seen || secs < 0) return;
   if (secs === 0) return void markOpenRead(folder, card);
   let left = secs;
-  const hint = () => ($("reader-seen-hint").textContent = `Will be marked as read in ${left} s`);
+  const hint = () => ($("reader-seen-hint").textContent = `Read in ${left} s`);
   hint();
   seenCountdown = setInterval(() => {
     left -= 1;
@@ -415,6 +415,26 @@ function markSelectedRow() {
   }
 }
 
+const FILE_FOLDER = "\u0001file"; // the folder of .eml files opened with the app (see the backend)
+
+/// Shows the .eml files opened from Finder or Explorer (the last one, when several).
+async function showOpenedFiles() {
+  const files = await invoke("take_opened_files").catch(() => []);
+  const last = files?.at(-1);
+  if (!last) return;
+  const [uid, name] = last;
+  if (!$("composer").hidden) minimizeComposer(true);
+  openReader(FILE_FOLDER, { uid, subject: name.replace(/\.eml$/i, ""), from: "", from_address: "", date: 0, seen: true, flagged: false, thread_refs: [] });
+}
+listen("files-opened", showOpenedFiles);
+
+/// The date of the open email, short; the long form when pointing at it.
+function showReaderDate(t) {
+  const d = new Date(t * 1000);
+  $("reader-date").textContent = t ? d.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  $("reader-date").title = t ? formatDate(t, true) : "";
+}
+
 async function openReader(folder, card, opts = {}) {
   dropMinimized(folder, card);
   readerCard = { folder, card };
@@ -433,12 +453,16 @@ async function openReader(folder, card, opts = {}) {
   markSelectedRow();
   updateSeenButton();
   $("reader-reply").disabled = $("reader-reply-all").disabled = true;
-  $("reader-trash").hidden = folderKind(folder) === "trash";
-  $("reader-archive").hidden = folderKind(folder) === "archive";
+  // An .eml file opened from Finder is in no folder: it can only be read and answered.
+  const fromFile = folder === FILE_FOLDER;
+  $("reader-trash").hidden = fromFile || folderKind(folder) === "trash";
+  $("reader-archive").hidden = fromFile || folderKind(folder) === "archive";
+  for (const id of ["reader-pin", "reader-seen", "reader-spam", "reader-move", "reader-snooze", "reader-task"]) $(id).hidden = fromFile;
   const inJunk = folderKind(folder) === "junk";
   $("reader-spam").querySelector("span").textContent = inJunk ? "Not spam" : "Spam";
   $("reader-spam").title = inJunk ? "Move back to the Inbox" : "Move to Junk";
   $("rule-scope").value = "address";
+  showImportanceMenu(false);
   updateSenderPanel();
   $("reader-subject").textContent = card.subject || "(no subject)";
   renderReaderTasks();
@@ -452,7 +476,7 @@ async function openReader(folder, card, opts = {}) {
   $("reader-unsubscribe").hidden = true;
   $("quick-reply").hidden = $("reader-quick").hidden = true;
   $("reader-cc").hidden = $("reader-cc-label").hidden = true;
-  $("reader-date").textContent = formatDate(card.date, true);
+  showReaderDate(card.date);
   $("reader-toggle").hidden = true;
   $("reader-attachments").hidden = true;
   $("reader-invite").hidden = true;
@@ -471,8 +495,8 @@ async function openReader(folder, card, opts = {}) {
     showQuickReply();
     $("reader-cc").hidden = $("reader-cc-label").hidden = !msg.cc;
     $("reader-reply").disabled = $("reader-reply-all").disabled = false;
-    if (readerCard?.card === card) startSeenTimer(folder, card);
-    if (msg.date) $("reader-date").textContent = formatDate(msg.date, true);
+    if (readerCard?.card === card && !fromFile) startSeenTimer(folder, card);
+    if (msg.date) showReaderDate(msg.date);
     readerMode = msg.html ? "html" : "text";
     readerRemoteAllowed = state.loadRemoteImages;
     $("reader-toggle").hidden = !(msg.html && msg.text);
@@ -480,7 +504,7 @@ async function openReader(folder, card, opts = {}) {
     renderInvite(msg.invite);
     renderReaderBody();
     ({ reply: () => replyTo(false), "reply-all": () => replyTo(true), forward }[opts.then])?.();
-    if (!opts.thread) loadThread(folder, card, msg);
+    if (!opts.thread && !fromFile) loadThread(folder, card, msg);
   } catch (e) {
     $("reader-body").replaceChildren(
       isOfflineError(e)
@@ -1154,6 +1178,7 @@ document.addEventListener("keydown", (ev) => {
   if (!$("dialog").hidden) closeDialog(null);
   else if (!$("composer").hidden && !composerMinimized()) closeComposer();
   else if (!$("settings").hidden) closeSettingsWithoutSaving();
+  else if (!$("security").hidden) closeSecurity();
   else if (!$("reader").hidden) closeReader();
   else if (focusKey) setFocus(null);
 });
