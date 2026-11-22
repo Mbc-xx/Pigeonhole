@@ -32,6 +32,14 @@ fn view(report: Report, new: Vec<Advisory>) -> SecurityView {
     }
 }
 
+/// The saved report, without advisories about package versions this build
+/// does not contain any more (the app was updated since it was made).
+fn load() -> Report {
+    let mut report = advisories::load();
+    report.keep_built(&advisories::parse_components(COMPONENTS));
+    report
+}
+
 fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -42,7 +50,7 @@ fn now() -> i64 {
 /// The last result, without going on the network.
 #[tauri::command]
 pub fn security_status() -> SecurityView {
-    view(advisories::load(), Vec::new())
+    view(load(), Vec::new())
 }
 
 /// Checks the components on OSV.dev: always with `force`, otherwise only when the
@@ -50,7 +58,7 @@ pub fn security_status() -> SecurityView {
 #[tauri::command]
 pub async fn security_check(force: bool) -> SecurityView {
     let _one = CHECKING.lock().await;
-    let mut report = advisories::load();
+    let mut report = load();
     if !force && !report.due(now(), APP_VERSION) {
         return view(report, Vec::new());
     }
@@ -84,7 +92,7 @@ pub async fn security_check(force: bool) -> SecurityView {
 /// The panel was opened: everything in it has been seen.
 #[tauri::command]
 pub fn security_seen() -> Result<SecurityView, String> {
-    let mut report = advisories::load();
+    let mut report = load();
     report.seen = report.advisories.iter().map(|a| a.key()).collect();
     advisories::save(&report).map_err(|e| format!("{e:#}"))?;
     Ok(view(report, Vec::new()))
@@ -93,7 +101,7 @@ pub fn security_seen() -> Result<SecurityView, String> {
 /// Turns the daily check on or off.
 #[tauri::command]
 pub fn security_auto(auto: bool) -> Result<SecurityView, String> {
-    let mut report = advisories::load();
+    let mut report = load();
     report.auto = auto;
     advisories::save(&report).map_err(|e| format!("{e:#}"))?;
     Ok(view(report, Vec::new()))
