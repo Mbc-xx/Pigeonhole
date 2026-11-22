@@ -106,6 +106,13 @@ impl Report {
     pub fn unseen(&self) -> usize {
         self.advisories.iter().filter(|a| !self.seen.contains(&a.key())).count()
     }
+    /// Keeps only the advisories about packages built into this version: after
+    /// an update, those of a package version no longer in the app are gone at
+    /// once, before the next check (or when that check fails).
+    pub fn keep_built(&mut self, components: &[Component]) {
+        self.advisories
+            .retain(|a| components.iter().any(|c| c.name == a.package && c.version == a.version));
+    }
     /// An automatic check is due.
     pub fn due(&self, now: i64, app_version: &str) -> bool {
         self.auto && (self.app_version != app_version || self.checked_at.is_none_or(|t| now - t >= AUTO_EVERY_SECS))
@@ -294,6 +301,34 @@ fn newer(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advisories_of_replaced_versions_go_away() {
+        let adv = |package: &str, version: &str| Advisory {
+            id: "RUSTSEC-0000-0001".into(),
+            aliases: Vec::new(),
+            package: package.into(),
+            version: version.into(),
+            via: String::new(),
+            summary: String::new(),
+            kind: "vulnerability".into(),
+            fixed: Vec::new(),
+            upgrade_to: None,
+            url: String::new(),
+            published: String::new(),
+        };
+        let mut report = Report {
+            advisories: vec![adv("url", "2.5.8"), adv("idna", "1.0.0")],
+            ..Report::default()
+        };
+        let built = |name: &str, version: &str| Component {
+            name: name.into(),
+            version: version.into(),
+            via: String::new(),
+        };
+        report.keep_built(&[built("url", "2.5.9"), built("idna", "1.0.0")]);
+        assert_eq!(report.advisories, vec![adv("idna", "1.0.0")]);
+    }
 
     #[test]
     fn reads_an_osv_record() {
