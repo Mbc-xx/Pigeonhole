@@ -727,26 +727,41 @@ function emailBodyHtml(msg) {
   return doc.body.innerHTML;
 }
 
-/// Who and what a reply to `msg` goes to (from the open email).
+/// Who and what a reply to `msg` goes to (from the open email). A reply to an
+/// email of mine goes to the people I wrote to, not back to me.
 function replyFields(msg, all) {
-  const me = state.email.toLowerCase();
-  const to = msg.reply_address;
-  const from = senderAmong(msg.all_recipients);
+  const author = (readerCard.card.from_address || msg.reply_address).toLowerCase();
+  const me = new Set([state.email, ...(state.myAddresses || [])].map((a) => a.trim().toLowerCase()));
+  // The mailbox of an extra sender may be shared: its emails are mine only in Sent.
+  const sentAs = folderKind(readerCard.folder) === "sent" ? senderNamed(author)?.email.toLowerCase() : "";
+  const mine = me.has(author) || !!sentAs;
+  const from = mine ? sentAs || "" : senderAmong(msg.all_recipients);
+  const skip = new Set([...me, from]);
+  /// Those not seen yet, each once.
+  const others = (list) => list.filter((a) => !skip.has(a.toLowerCase()) && skip.add(a.toLowerCase()));
+  const addresses = (text) => text.split(", ").filter((a) => a.includes("@"));
+  let to = msg.reply_address;
+  if (mine) to = others(addresses(msg.to)).join(", ") || lastOtherAuthor(msg, me) || to;
+  skip.add(to.toLowerCase());
   let cc = "";
   if (all) {
-    const seen = new Set([me, from, to.toLowerCase()]);
-    cc = msg.all_recipients
-      .filter((a) => {
-        const k = a.toLowerCase();
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      })
-      .join(", ");
+    const wroteTo = others(addresses(msg.to));
+    // In To an alias is where the email arrived; in Cc it was put on purpose.
+    for (const a of me) if (![state.email.toLowerCase(), to.toLowerCase(), from].includes(a)) skip.delete(a);
+    cc = [...wroteTo, ...others(addresses(msg.cc))].join(", ");
   }
   const subject = /^re:/i.test(msg.subject.trim()) ? msg.subject : "Re: " + msg.subject;
   const reply = readerCard.folder === FILE_FOLDER ? null : { folder: readerCard.folder, uid: readerCard.card.uid };
   return { to, cc, subject, from, reply, context: { in_reply_to: msg.message_id, references: msg.references } };
+}
+
+/// The last person other than me who wrote in the conversation before `msg`.
+function lastOtherAuthor(msg, me) {
+  const theirs = (readerThread || []).filter(({ folder, card }) => {
+    const a = (card.from_address || "").toLowerCase();
+    return a && !me.has(a) && folder !== draftsFolder() && card.date <= msg.date;
+  });
+  return theirs.sort((x, y) => y.card.date - x.card.date)[0]?.card.from_address;
 }
 
 function replyTo(all, text = "") {
