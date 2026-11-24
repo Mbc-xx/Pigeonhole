@@ -97,7 +97,7 @@ function renderFolders() {
     const color = folderColor(f.name);
     if (color) ic.style.color = color;
     item.append(ic, el("span", "label", f.label));
-    const unseen = f.kind === "inbox" ? inboxUnread() : f.unseen;
+    const unseen = f.kind === "inbox" ? inboxUnread() : f.kind === "sent" ? 0 : f.unseen;
     if (unseen) item.append(el("span", "badge", String(unseen)));
     if (!f.selectable) {
       item.classList.add("disabled");
@@ -966,6 +966,9 @@ function openFolder(f) {
   renderColumns();
   renderFolders();
   loadColumn(f.name);
+  // Its emails may have been read by another program: the number follows.
+  touchedFolders.add(f.name);
+  scheduleFolderCounts();
 }
 
 function showBoard() {

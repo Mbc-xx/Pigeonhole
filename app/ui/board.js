@@ -1600,7 +1600,8 @@ function changeUnseen(folder, by) {
 }
 
 /// All Mail and Gmail's views repeat other folders, and counting them takes long.
-const countsUnseen = (f) => f.selectable && f.kind !== "all" && f.kind !== "view";
+/// Sent holds what you wrote: "unread" says nothing there.
+const countsUnseen = (f) => f.selectable && !["all", "view", "sent"].includes(f.kind);
 
 async function refreshUnseen(folders) {
   const counts = await invoke("folder_unseen", { folders });
