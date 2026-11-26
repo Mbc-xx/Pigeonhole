@@ -295,6 +295,8 @@ function seenEverywhere(folder, card, seen) {
       renderCards(key);
     }
   }
+  // The whole-conversation button says read or unread for all of it.
+  if (readerCard) updateConvBar();
 }
 
 /// The open email is read; with conversations grouped, the card stood for
@@ -524,12 +526,43 @@ async function openReader(folder, card, opts = {}) {
     ({ reply: () => replyTo(false), "reply-all": () => replyTo(true), forward }[opts.then])?.();
     if (!opts.thread && !fromFile) loadThread(folder, card, msg);
   } catch (e) {
+    // Moved meanwhile (a minimized email, a list not refreshed yet): it is
+    // looked for by its Message-ID and opened where it is now.
+    const gone = String(e).includes("no longer exists");
+    if (gone && !opts.relocated) {
+      const now = await findMovedEmail(folder, card);
+      if (readerCard?.card !== card) return;
+      if (now) return openReader(now.folder, now.card, { ...opts, thread: null, relocated: true });
+    }
     $("reader-body").replaceChildren(
       isOfflineError(e)
         ? el("p", "muted offline-note", "This email is not on this Mac yet and the server cannot be reached. It will open when the connection is back.")
-        : el("pre", "error", String(e)),
+        : gone
+          ? el("p", "muted", `This email is no longer in ${folderLabel(folder)}: it was moved or deleted, and it was not found in another folder.`)
+          : el("pre", "error", String(e)),
     );
   }
+}
+
+/// Where an email is now, after it left `folder`: in the lists already loaded,
+/// in the copy on this Mac, then on the server. null when it is nowhere.
+async function findMovedEmail(folder, card) {
+  const id = mailId(card.message_id);
+  if (!id) return null;
+  const same = (e) => mailId(e.card.message_id) === id && !(e.folder === folder && e.card.uid === card.uid);
+  const loaded = Object.entries(state.cards).flatMap(([key, list]) =>
+    (list || []).map((c) => ({ folder: MULTI_KEYS.includes(key) ? c.__folder : key, card: c })),
+  );
+  const found = loaded.find((e) => e.folder && same(e));
+  if (found) return found;
+  for (const ask of [
+    () => invoke("local_thread", { messageId: card.message_id, references: [] }),
+    () => invoke("load_thread", { folder, messageId: card.message_id, references: [], columns: state.columns.map((c) => c.folder) }),
+  ]) {
+    const hit = (await ask().catch(() => [])).find(same);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /// Joins conversation lists (local and from the server): one entry per email,
