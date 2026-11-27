@@ -137,6 +137,16 @@ function polyfill(window) {
   window.Element.prototype.scrollIntoView = function () {};
   window.Element.prototype.scrollTo = function () {};
   window.document.execCommand = () => true;
+  // innerText needs a layout: blocks and <br> as line breaks is close enough.
+  if (!("innerText" in window.HTMLElement.prototype)) {
+    Object.defineProperty(window.HTMLElement.prototype, "innerText", {
+      get() {
+        const walk = (n) => n.nodeType === 3 ? n.nodeValue : n.nodeName === "BR" ? "\n" : [...n.childNodes].map(walk).join("") + (/^(DIV|P|LI|H[1-6]|BLOCKQUOTE|UL|OL)$/.test(n.nodeName) ? "\n" : "");
+        return walk(this).replace(/\n$/, "");
+      },
+      configurable: true,
+    });
+  }
   window.requestAnimationFrame = (fn) => setTimeout(() => fn(Date.now()), 0);
   window.cancelAnimationFrame = (id) => clearTimeout(id);
 }
