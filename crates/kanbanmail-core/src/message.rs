@@ -32,6 +32,10 @@ pub struct Card {
     /// Size on the server in bytes, attachments included; 0 when not asked for.
     #[serde(default)]
     pub size: u32,
+    /// Set on a copy whose attachments this app removed (its X-Pigeonhole-Removed
+    /// header): it shares its Message-ID with the original, but not its content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed_mark: Option<String>,
 }
 
 /// An attachment that can be downloaded from the reader.
@@ -50,6 +54,10 @@ pub struct RemovedAttachment {
     pub what: String,
     pub day: String,
 }
+
+/// The header that marks a copy whose attachments were removed, with a value
+/// unique to each removal.
+pub const REMOVED_HEADER: &str = "X-Pigeonhole-Removed";
 
 /// How the note left in place of a removed attachment starts.
 const REMOVED_NOTE: &str = "[Attachment removed by Pigeonhole on ";
@@ -196,11 +204,24 @@ pub fn parse_card(uid: u32, raw: &[u8], flagged: bool, seen: bool, fallback_date
         .and_then(|l| l.first())
         .and_then(|m| m.address().map(str::to_string))
         .unwrap_or_default();
+    let removed_mark = parsed.as_ref().and_then(|m| {
+        let value = m.headers().get(REMOVED_HEADER)?;
+        let mark: String = String::from_utf8_lossy(value.raw_value())
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '.')
+            .take(40)
+            .collect();
+        (!mark.is_empty()).then_some(mark)
+    });
     let has_attachments = parsed.as_ref().is_some_and(|m| {
-        m.content_type().is_some_and(|ct| {
-            ct.ctype().eq_ignore_ascii_case("multipart")
-                && ct.subtype().is_some_and(|s| s.eq_ignore_ascii_case("mixed"))
-        }) || m.attachments().any(|p| p.content_id().is_none())
+        // Once attachments were removed, only those left count: the email
+        // stays "mixed", with notes where the files were.
+        (removed_mark.is_none()
+            && m.content_type().is_some_and(|ct| {
+                ct.ctype().eq_ignore_ascii_case("multipart")
+                    && ct.subtype().is_some_and(|s| s.eq_ignore_ascii_case("mixed"))
+            }))
+            || m.attachments().any(|p| p.content_id().is_none())
     });
     let (from, subject, date, preview) = match &parsed {
         Some(m) => {
@@ -261,6 +282,7 @@ pub fn parse_card(uid: u32, raw: &[u8], flagged: bool, seen: bool, fallback_date
         to,
         to_only,
         size: 0,
+        removed_mark,
     }
 }
 
@@ -597,6 +619,15 @@ pub fn strip_attachments(raw: &[u8], indexes: &[usize], day: &str) -> Result<(Ve
     for (start, end, new) in cuts.into_iter().rev() {
         out.splice(start..end, new);
     }
+    // The mark goes first, so the card of the lighter copy (read from the
+    // first bytes) knows it is not the original.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| format!("{}.{:09}", d.as_secs(), d.subsec_nanos()))
+        .unwrap_or_else(|_| "0".into());
+    let mut mark = format!("{REMOVED_HEADER}: {stamp}").into_bytes();
+    mark.extend_from_slice(nl);
+    out.splice(0..0, mark);
     let saved = raw.len().saturating_sub(out.len());
     Ok((out, saved))
 }
@@ -1050,7 +1081,16 @@ iVBORw0KGgo=\r\n\
             .split("--b1\r\nContent-Type: application/pdf")
             .next()
             .unwrap();
-        assert!(text.starts_with(head));
+        let (mark, rest) = text.split_once("\r\n").unwrap();
+        assert!(mark.starts_with("X-Pigeonhole-Removed: "), "{mark}");
+        assert!(rest.starts_with(head), "the mark first, then the headers as they were");
+        // Its card knows it is the lighter copy; the photo left keeps the paperclip.
+        let card = parse_card(1, &out, false, false, 0);
+        assert_eq!(
+            card.removed_mark.as_deref(),
+            Some(&mark["X-Pigeonhole-Removed: ".len()..])
+        );
+        assert!(card.has_attachments);
         assert!(text.ends_with("--b1\r\nContent-Type: image/png; name=\"photo.png\"\r\nContent-Disposition: attachment; filename=\"photo.png\"\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n--b1--\r\n"));
         // It reads as before, with the note in place of the PDF.
         let view = parse_view(&out);
@@ -1068,6 +1108,10 @@ iVBORw0KGgo=\r\n\
         // Both at once.
         let (both, _) = strip_attachments(raw, &[1, 0], "27 Nov 2026").unwrap();
         assert!(parse_view(&both).attachments.is_empty());
+        // Nothing left: no paperclip, though the email is still "mixed".
+        assert!(!parse_card(1, &both, false, false, 0).has_attachments);
+        // Each removal has its own mark.
+        assert_ne!(parse_card(1, &both, false, false, 0).removed_mark, card.removed_mark);
     }
 
     #[test]
