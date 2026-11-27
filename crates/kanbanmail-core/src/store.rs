@@ -508,7 +508,8 @@ impl Store {
         }
         let since = q.since.as_deref().and_then(day_start);
         let before = q.before.as_deref().and_then(day_start);
-        if terms.is_empty() && since.is_none() && before.is_none() {
+        // Sizes are not kept on this Mac: only the server knows them.
+        if q.larger.is_some() || (terms.is_empty() && since.is_none() && before.is_none()) {
             return Ok(Vec::new());
         }
         let words = if terms.is_empty() {
@@ -736,6 +737,7 @@ mod tests {
             thread_refs: refs.iter().map(|r| format!("<{r}>")).collect(),
             to: "me@example.com".into(),
             to_only: "me@example.com".into(),
+            size: 0,
         }
     }
 

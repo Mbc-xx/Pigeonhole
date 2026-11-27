@@ -14,7 +14,7 @@ const mailId = (id) => (id || "").replace(/^<|>$/g, "").trim().toLowerCase();
 // Calls that read the server turn the connection light yellow while they run.
 // Part of the error of a browser sign-in that stopped working (see oauth.rs).
 const SIGN_IN_AGAIN = "Sign in again";
-const SERVER_READS = new Set(["open_board", "load_column", "list_folders", "folder_unseen", "load_all_mail", "search_emails", "flush_queue"]);
+const SERVER_READS = new Set(["open_board", "load_column", "list_folders", "folder_unseen", "load_all_mail", "search_emails", "server_space", "flush_queue"]);
 // The backend's answer to something it gave up because the account changed.
 const LEFT_ACCOUNT = "left this account";
 let serverBusy = 0;

@@ -43,7 +43,8 @@ function updateSeenButton() {
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
-  return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  if (bytes < 1024 ** 3) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  return (bytes / 1024 ** 3).toFixed(1) + " GB";
 }
 
 function renderAttachments(folder, uid, list) {
@@ -1105,12 +1106,34 @@ async function openCheckedLink({ url, shown }) {
   if (choice === "open") openLink(url);
 }
 
+/// What a mailto: link fills in (RFC 6068): the addresses before "?" and in
+/// to=, plus cc=, bcc=, subject= and body=, whatever their case. Unlike a web
+/// form, "+" stays a plus (anna+work@example.com).
+function mailtoFields(url) {
+  const dec = (text) => {
+    try {
+      return decodeURIComponent(text);
+    } catch (_) {
+      return text;
+    }
+  };
+  const [path, query = ""] = url.replace(/^mailto:/i, "").split(/\?(.*)/s);
+  const f = { to: [dec(path)], cc: [], bcc: [], subject: [], body: [] };
+  for (const pair of query.split("&")) {
+    const [key, value = ""] = pair.split(/=(.*)/s);
+    const name = dec(key).toLowerCase();
+    if (Object.hasOwn(f, name)) f[name].push(dec(value));
+  }
+  const list = (values) => values.map((v) => v.trim()).filter(Boolean).join(", ");
+  return { to: list(f.to), cc: list(f.cc), bcc: list(f.bcc), subject: f.subject[0] || "", body: f.body[0] || "" };
+}
+
 function openLink(href) {
   const url = (href || "").trim();
   if (/^mailto:/i.test(url)) {
-    const [addr, query] = url.slice(7).split("?");
-    const params = new URLSearchParams(query || "");
-    openComposer({ to: decodeURIComponent(addr), subject: params.get("subject") || "", body: (params.get("body") || "") + signatureBlock() });
+    const { to, cc, bcc, subject, body } = mailtoFields(url);
+    // Cc and Bcc stay in view in the new email: none is added unseen.
+    openComposer({ to, cc, ...(bcc ? { bcc } : {}), subject, body: body + signatureBlock() });
   } else if (/^https?:\/\//i.test(url)) {
     invoke("open_url", { url }).catch((e) => toast("Could not open the link: " + e));
   }

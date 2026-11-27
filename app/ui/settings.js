@@ -54,6 +54,7 @@ async function openSettings(lookOf = null) {
     if (!$("set-cache-mb").value) $("set-cache-mb").value = "1024";
     $("set-prefetch").checked = s.prefetch ?? true;
     showCacheStats();
+    showServerSpace();
     $("set-notify").value = s.notify || "important";
     $("set-only-to-me").checked = !!s.only_to_me;
     $("set-count").value = s.count_unread || "all";
@@ -118,6 +119,33 @@ function showThemeInForm(theme) {
   $("set-theme-mode").value = custom?.mode || "dark";
   $("set-theme-tint").value = custom?.tint || "neutral";
 }
+/// How full the mailbox is on the server, when the server says.
+async function showServerSpace() {
+  const text = $("server-space");
+  const bar = $("server-space-bar");
+  bar.hidden = true;
+  text.textContent = "Asking the server…";
+  try {
+    const space = await invoke("server_space");
+    if (!space) {
+      text.textContent = "The server does not say how much space your emails take.";
+      return;
+    }
+    const used = Math.min(100, Math.round((space.used / space.limit) * 100));
+    text.textContent = `${formatSize(space.used)} of ${formatSize(space.limit)} used (${used}%)`;
+    bar.hidden = false;
+    bar.classList.toggle("full", used >= 90);
+    bar.firstElementChild.style.width = used + "%";
+  } catch (e) {
+    text.textContent = isOfflineError(e) ? "Not available without a connection." : "Could not ask the server.";
+  }
+}
+
+$("show-largest").addEventListener("click", () => {
+  closeSettingsWithoutSaving();
+  openLargest();
+});
+
 function closeSettingsWithoutSaving() {
   if (state.appearance) applyAppearance(state.appearance);
   if (readerMessage) renderReaderBody();

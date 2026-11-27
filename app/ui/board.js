@@ -199,6 +199,12 @@ function renderColumns() {
       markRead.addEventListener("click", () => markAllRead(col.folder));
       head.append(markRead);
     }
+    if (state.view?.folder === ALL_KEY) {
+      const largest = el("button", "head-btn", "Largest");
+      largest.title = "The emails that take the most space on the server, from every folder, biggest first";
+      largest.addEventListener("click", () => openLargest());
+      head.append(largest);
+    }
     if (state.view?.task) {
       const open = el("button", "head-btn", "Open task");
       open.title = state.view.task.url;
@@ -599,7 +605,8 @@ function renderCards(folder) {
     return b;
   };
   // Search results and All Mail come from several folders: each card carries its own.
-  if (state.groupThreads) {
+  // Biggest first means each email on its own, not conversations.
+  if (state.groupThreads && !state.view?.bySize) {
     for (const g of byHand(folder, groupsOf(list), (g) => g.members, (g) => g.rep.card.date)) {
       const thread = g.members.length > 1 ? g : null;
       const rep = renderCard(g.rep.folder, g.rep.card, thread);
@@ -695,6 +702,15 @@ function daysInColumn(ctx, members, mine = myAddresses()) {
   const theirs = members.filter((m) => !mine.has((m.card.from_address || "").toLowerCase()));
   const entered = Math.max(...(theirs.length ? theirs : members).map((m) => Math.min(at(m), Math.max(m.card.date, start))));
   return Math.floor((ctx.now - entered) / 86400);
+}
+
+/// How much space an email takes on the server, in the list of the largest.
+function sizeTag(members) {
+  const size = state.view?.bySize ? Math.max(...members.map((m) => m.card.size || 0)) : 0;
+  if (!size) return null;
+  const tag = el("span", "wait-tag size", formatSize(size));
+  tag.title = "Space it takes on the server, attachments included";
+  return tag;
 }
 
 /// "6d" on an email that has waited too long in the to-do column (the
@@ -943,22 +959,33 @@ function fold(text) {
 
 /// What the search box asks for: plain words plus from:, to:, subject:, after:,
 /// before: and date: (a day 2026-10-05 or 5/10/2026, a month 2026-10, a year 2026;
-/// both ends included). Quotes keep words together: from:"Rachel Green".
+/// both ends included), and larger: (5mb, 500kb, or 10 for megabytes).
+/// Quotes keep words together: from:"Rachel Green".
 /// Days are sent as "YYYY-MM-DD", `before` being the first day left out.
 function parseQuery(text) {
-  const q = { words: [], from: [], to: [], subject: [], since: null, before: null };
+  const q = { words: [], from: [], to: [], subject: [], since: null, before: null, larger: null };
   for (const m of text.matchAll(/(\w+):(?:"([^"]*)"|(\S+))|"([^"]*)"|(\S+)/g)) {
     const key = m[1]?.toLowerCase();
     const value = (m[2] ?? m[3] ?? "").trim();
     const days = ["after", "before", "date"].includes(key) && dayRange(value);
     const word = (m[4] ?? m[5] ?? m[0]).trim();
     if (["from", "to", "subject"].includes(key) && value) q[key].push(value);
+    else if (key === "larger" && sizeBytes(value)) q.larger = sizeBytes(value);
     else if (days) {
       if (key !== "before") q.since = days[0];
       if (key !== "after") q.before = days[1];
     } else if (word) q.words.push(word);
   }
   return q;
+}
+
+/// "5mb", "500kb", "1.5gb" or a bare number of megabytes, in bytes (null if not a size).
+function sizeBytes(text) {
+  const m = text.toLowerCase().match(/^(\d+(?:[.,]\d+)?)\s*(k|kb|m|mb|g|gb)?$/);
+  if (!m) return null;
+  const unit = { k: 1, kb: 1, m: 2, mb: 2, g: 3, gb: 3 }[m[2] || "mb"];
+  const bytes = Math.round(parseFloat(m[1].replace(",", ".")) * 1024 ** unit);
+  return bytes > 0 && bytes < 2 ** 32 ? bytes : null;
 }
 
 /// A day, month or year as [first day, first day after], both "YYYY-MM-DD".
@@ -979,7 +1006,8 @@ function dayRange(text) {
 /// The search box filters the loaded cards as you type (accents and case ignored).
 function boardFilter(text) {
   const q = parseQuery(text);
-  if (!q.since && !q.before && ![q.words, q.from, q.to, q.subject].some((l) => l.length)) return null;
+  // A size alone filters nothing here (loaded emails carry no size): it asks the server.
+  if (!q.since && !q.before && !q.larger && ![q.words, q.from, q.to, q.subject].some((l) => l.length)) return null;
   const f = (list) => list.map(fold);
   const time = (day) => day && new Date(day + "T00:00").getTime() / 1000;
   return { words: f(q.words), from: f(q.from), to: f(q.to), subject: f(q.subject), since: time(q.since), before: time(q.before) };
@@ -1071,7 +1099,9 @@ function renderCard(folder, card, group = null, { child = false } = {}) {
     if (state.view?.multi) date.prepend(...folderTags(members));
     else if (child && folder !== state.view.folder) date.prepend(folderTag(folder));
     const from = el("span", "row-from");
-    const thread = group || (!child && state.groupThreads && hasConversation(card) ? { members, rep: { folder, card } } : null);
+    // The list of the largest shows each email alone: no conversation to open.
+    const grouping = state.groupThreads && !state.view?.bySize;
+    const thread = group || (!child && grouping && hasConversation(card) ? { members, rep: { folder, card } } : null);
     if (thread) {
       const open = state.expanded.has(threadKey(thread));
       const chev = el("button", "chevron" + (open ? " open" : ""));
@@ -1087,7 +1117,7 @@ function renderCard(folder, card, group = null, { child = false } = {}) {
         renderCards(c.closest(".column").dataset.folder);
       });
       from.append(chev);
-    } else if (!child && state.groupThreads) {
+    } else if (!child && grouping) {
       from.append(el("span", "chevron-space"));
     }
     from.append(el("span", "unread-dot"), avatar(card.from || card.from_address || "?"), el("span", "row-name", child ? card.from || "(unknown sender)" : fromText));
@@ -1099,7 +1129,7 @@ function renderCard(folder, card, group = null, { child = false } = {}) {
       from.append(b);
     }
     // Urgent first (unsent reply, late), then my next step, tasks and snooze.
-    const rowTags = [draftTag(members, folder), todoTag(members), stepTag(members), ...taskTags(members), snoozeTag(members), waitingTags(members)].filter(Boolean);
+    const rowTags = [sizeTag(members), draftTag(members, folder), todoTag(members), stepTag(members), ...taskTags(members), snoozeTag(members), waitingTags(members)].filter(Boolean);
     date.prepend(...rowTags);
     c.append(from, main, date, actions);
     // Preview below, from under the sender to under the subject.

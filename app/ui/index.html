@@ -630,6 +630,12 @@
         </section>
 
         <section class="tab-panel" data-panel="storage" role="tabpanel" hidden>
+          <div class="field">
+            <span class="field-label">Space on the server</span>
+            <p id="server-space" class="muted small"></p>
+            <div id="server-space-bar" class="space-bar" hidden><span></span></div>
+            <div><button type="button" id="show-largest" title="Closes the settings without saving and lists the biggest emails of every folder">See the largest emails</button></div>
+          </div>
           <label>Save attachments and exported settings
             <select id="set-save-where">
               <option value="ask">Ask every time</option>

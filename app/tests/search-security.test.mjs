@@ -7,12 +7,12 @@ test("the search box understands from:, subject:, quotes and dates", async () =>
   const app = await openApp();
   const q = (text) => app.get(`parseQuery(${JSON.stringify(text)})`);
   assert.deepEqual(q(`from:"Rachel Green" subject:budget "kick off" q3`), {
-    words: ["kick off", "q3"], from: ["Rachel Green"], to: [], subject: ["budget"], since: null, before: null,
+    words: ["kick off", "q3"], from: ["Rachel Green"], to: [], subject: ["budget"], since: null, before: null, larger: null,
   });
-  assert.deepEqual(q("date:2026-10"), { words: [], from: [], to: [], subject: [], since: "2026-10-01", before: "2026-11-01" });
+  assert.deepEqual(q("date:2026-10"), { words: [], from: [], to: [], subject: [], since: "2026-10-01", before: "2026-11-01", larger: null });
   assert.deepEqual(q("after:2026-12-31 before:2027").since, "2026-12-31");
   assert.deepEqual(q("after:2026-12-31 before:2027").before, "2028-01-01", "both ends included: all of 2027");
-  assert.deepEqual(q("date:5/10/2026"), { words: [], from: [], to: [], subject: [], since: "2026-10-05", before: "2026-10-06" });
+  assert.deepEqual(q("date:5/10/2026"), { words: [], from: [], to: [], subject: [], since: "2026-10-05", before: "2026-10-06", larger: null });
   assert.deepEqual(q("after:soon").words, ["after:soon"], "not a date: searched as a word");
 });
 

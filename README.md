@@ -136,10 +136,14 @@ variables come from there.
 - **Search** filters the loaded cards as you type, then searches the server:
   first the main folders, then all the others, and on request the whole server
   including the text. It understands `from:`, `to:`, `subject:`, `after:`,
-  `before:`, `date:` and quotes:
+  `before:`, `date:`, `larger:` (`larger:5mb`, `larger:500kb`) and quotes:
   `from:"Rachel Green" after:2026-10-01 invoice`.
 - **All Mail** lists the 200 most recent emails of every folder, each tagged
   with its folder.
+- **Largest** (in All Mail) lists the emails of every folder bigger than 1, 5,
+  10 or 25 MB, biggest first and each with its size: what to clean up when the
+  mailbox is nearly full. Settings → Storage shows how much of the space on the
+  server is used, when the server says (IMAP QUOTA).
 - **Sidebar**: choose which folders it shows, their order and color; the Move
   to… list has its own choice of folders and a field to find one by name. It
   folds into a rail of icons (⌘B).

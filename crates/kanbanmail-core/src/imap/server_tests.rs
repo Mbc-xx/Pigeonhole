@@ -183,3 +183,53 @@ async fn a_missing_folder_is_an_error_not_a_panic() {
         .unwrap_err();
     assert!(err.to_string().contains("cannot open folder Nope"), "{err}");
 }
+
+#[tokio::test]
+async fn the_space_used_comes_from_the_quota_or_not_at_all() {
+    let mut mb = Mailbox::new(&["QUOTA"], FOLDERS);
+    mb.quota = (4_200_000, 10_485_760);
+    let (_server, mut s) = start(mb).await;
+    let got = space(&mut s).await.unwrap().unwrap();
+    assert_eq!(got.used, 4_200_000 * 1024);
+    assert_eq!(got.limit, 10 * 1024 * 1024 * 1024);
+
+    // No limit set: nothing to show.
+    let mut mb = Mailbox::new(&["QUOTA"], FOLDERS);
+    mb.quota = (500, 0);
+    let (_server, mut s) = start(mb).await;
+    assert_eq!(space(&mut s).await.unwrap(), None);
+
+    // A server without QUOTA is not asked.
+    let (server, mut s) = start(Mailbox::new(ALL, FOLDERS)).await;
+    assert_eq!(space(&mut s).await.unwrap(), None);
+    assert_eq!(server.lock().unwrap().count("GETQUOTAROOT"), 0);
+}
+
+#[tokio::test]
+async fn the_largest_emails_come_biggest_first_from_every_folder() {
+    let big = |subject: &str, id: &str, kb: usize| email(subject, id, &format!("X-Pad: {}\n", "a".repeat(kb * 1024)));
+    let mut mb = Mailbox::new(ALL, FOLDERS);
+    mb.deliver("INBOX", &big("Medium", "m@x", 30), &[], 1);
+    mb.deliver("INBOX", &email("Small", "s@x", ""), &[], 2);
+    mb.deliver("Archive", &big("Huge", "h@x", 60), &[], 3);
+    mb.deliver("Todo", &big("Just over", "j@x", 21), &[], 4);
+    let (server, mut s) = start(mb).await;
+    let q = SearchQuery {
+        larger: Some(20 * 1024),
+        ..Default::default()
+    };
+    let folders: Vec<String> = FOLDERS.iter().map(|f| f.to_string()).collect();
+    let found = search(&mut s, &q, false, &folders, usize::MAX).await.unwrap();
+    let got: Vec<_> = found
+        .iter()
+        .map(|e| (e.card.subject.as_str(), e.folder.as_str()))
+        .collect();
+    assert_eq!(got, [("Huge", "Archive"), ("Medium", "INBOX"), ("Just over", "Todo")]);
+    assert!(found[0].card.size > 60 * 1024 && found[1].card.size > 30 * 1024);
+    assert!(server
+        .lock()
+        .unwrap()
+        .log
+        .iter()
+        .any(|l| l.ends_with("SEARCH CHARSET UTF-8 LARGER 20480")));
+}
