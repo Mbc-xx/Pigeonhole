@@ -486,6 +486,7 @@ async function openReader(folder, card, opts = {}) {
   updateSenderPanel();
   $("reader-subject").textContent = card.subject || "(no subject)";
   renderReaderTasks();
+  renderReaderStep();
   renderReaderDraft();
   $("reader-from").textContent = card.from || "(unknown sender)";
   $("reader-from-address").textContent = card.from_address && card.from_address !== card.from ? card.from_address : "";

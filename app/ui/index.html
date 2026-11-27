@@ -10,6 +10,9 @@
   <!-- Line icons (24×24, stroke = currentColor), referenced with <use href="#i-name"> -->
   <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
     <symbol id="i-allmail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9l1.6-4.2A1.5 1.5 0 0 1 7 4h10a1.5 1.5 0 0 1 1.4.8L20 9v4H4z"/><path d="M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/><path d="M4 9h4l1 2h6l1-2h4"/></symbol>
+    <symbol id="i-step" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h12"/><path d="M12 7l5 5-5 5"/><path d="M20 5v14"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14"/><path d="M12 20V9"/><path d="M7 13l5-5 5 5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20h14"/><path d="M12 4v11"/><path d="M7 11l5 5 5-5"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></symbol>
     <symbol id="i-forward" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7l5 5-5 5"/><path d="M20 12H10a6 6 0 0 0-6 6v1"/></symbol>
@@ -170,6 +173,7 @@
             <dt id="reader-cc-label">Cc</dt><dd id="reader-cc"></dd>
           </dl>
           <div id="reader-draft" class="reader-draft" hidden></div>
+          <div id="reader-step" class="reader-step"></div>
           <div id="reader-tasks" class="reader-tasks" hidden></div>
           <!-- Actions on this email only -->
           <div class="reader-actions">
@@ -657,7 +661,7 @@
           </div>
           <div class="field">
             <span class="field-label">Export and import</span>
-            <p class="muted small">Save your columns, signature, rules, folders and settings to a file (without the password), to keep a backup or move them to another computer.</p>
+            <p class="muted small">Save your columns, signature, rules, folders and settings, with the tasks, next steps, to-do order and snoozed emails of this account, to a file (without the password), to keep a backup or move them to another computer, Mac or Windows.</p>
             <div class="button-row">
               <button type="button" id="export-settings">Export settings…</button>
               <button type="button" id="import-settings">Import settings…</button>
@@ -721,6 +725,7 @@
   <script src="app.js"></script>
   <script src="board.js"></script>
   <script src="organize.js"></script>
+  <script src="worklist.js"></script>
   <script src="reader.js"></script>
   <script src="compose.js"></script>
   <script src="security.js"></script>

@@ -5,6 +5,7 @@ pub mod advisories;
 pub mod board;
 pub mod imap;
 pub mod message;
+pub mod notes;
 pub mod oauth;
 pub mod secret;
 pub mod settings;

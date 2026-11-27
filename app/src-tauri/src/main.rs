@@ -10,6 +10,7 @@ use kanbanmail_core::{
     board::{board_path, Board},
     imap::{self, FolderCache, ServerCaps, Session},
     message::{Card, MessageView},
+    notes::{self, Notes},
     oauth, secret,
     settings::{Sender, Settings},
     smtp::{self, Draft},
@@ -1661,6 +1662,35 @@ fn rename_task(url: String, name: String) -> CmdResult<Vec<Task>> {
     })
 }
 
+/// The next steps written on emails and the order of the to-do column.
+#[tauri::command]
+fn list_notes() -> CmdResult<Notes> {
+    notes::load().map_err(err)
+}
+
+fn change_notes(change: impl FnOnce(&mut Notes)) -> CmdResult<Notes> {
+    let mut n = notes::load().map_err(err)?;
+    change(&mut n);
+    notes::save(&n).map_err(err)?;
+    Ok(n)
+}
+
+/// Writes the next step of an email (`text` empty removes it); `clear` takes
+/// it off the other emails of the same conversation, so only one shows.
+#[tauri::command]
+fn set_next_step(id: String, text: String, clear: Option<Vec<String>>) -> CmdResult<Notes> {
+    change_notes(|n| {
+        notes::clear_steps(n, &clear.unwrap_or_default());
+        notes::set_step(n, &id, &text);
+    })
+}
+
+/// The to-do column in the order dragged by hand, top first (Message-IDs).
+#[tauri::command]
+fn set_todo_order(ids: Vec<String>) -> CmdResult<Notes> {
+    change_notes(|n| notes::set_order(n, &ids))
+}
+
 /// The emails put aside until a time, soonest first.
 #[tauri::command]
 fn list_snoozed() -> CmdResult<Vec<Snoozed>> {
@@ -2250,6 +2280,12 @@ struct ExportFile {
     /// Emails linked to tasks; missing in files saved by older versions.
     #[serde(default)]
     tasks: Vec<Task>,
+    /// Next steps and the to-do order; missing in files of versions before 2.17.
+    #[serde(default)]
+    notes: Notes,
+    /// Emails put aside until a time; missing in files of versions before 2.17.
+    #[serde(default)]
+    snoozed: Vec<Snoozed>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2285,6 +2321,8 @@ async fn export_settings(window: tauri::Window, state: State<'_, AppState>) -> C
         board_toml: std::fs::read_to_string(board_path().map_err(err)?).unwrap_or_default(),
         settings: Settings::load().map_err(err)?,
         tasks: tasks::load().map_err(err)?,
+        notes: notes::load().map_err(err)?,
+        snoozed: snooze::load().map_err(err)?,
     };
     let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
     save_file(&window, "KanbanMail-settings.json", json.as_bytes()).await
@@ -2317,11 +2355,18 @@ async fn import_settings(json: String, state: State<'_, AppState>) -> CmdResult<
         acc.smtp_server = file.account.smtp_server;
         acc.smtp_port = file.account.smtp_port;
         acc.save().map_err(err)?;
-        // The links are about this mailbox's emails: they follow it only.
+        // Links, notes and snoozed emails are about this mailbox's emails:
+        // they follow it only.
         if !file.tasks.is_empty() {
             tasks::save(&file.tasks).map_err(err)?;
         }
-        Ok("Settings, columns and account details imported.".into())
+        if file.notes != Notes::default() {
+            notes::save(&file.notes).map_err(err)?;
+        }
+        if !file.snoozed.is_empty() {
+            snooze::save(&file.snoozed).map_err(err)?;
+        }
+        Ok("Settings, columns, account details, next steps and snoozed emails imported.".into())
     } else {
         Ok(format!(
             "Settings and columns imported. Account details were kept: the file is for {}.",
@@ -2621,6 +2666,9 @@ fn main() {
             rename_task,
             task_emails,
             list_snoozed,
+            list_notes,
+            set_next_step,
+            set_todo_order,
             add_snoozed,
             remove_snoozed,
             cache_stats,
@@ -2676,5 +2724,31 @@ mod tests {
         let back = serde_json::to_value(&view).unwrap();
         assert_eq!(back["email"], "a@example.com");
         assert_eq!(back["undo_seconds"], 15);
+    }
+
+    #[test]
+    fn export_files_carry_notes_and_snoozed_and_old_ones_still_read() {
+        let old = r#"{"app":"KanbanMail","version":1,"board_toml":"","settings":{},
+            "account":{"server":"imap.example.com","email":"a@example.com","display_name":null,"smtp_server":null,"smtp_port":465}}"#;
+        let file: ExportFile = serde_json::from_str(old).unwrap();
+        assert!(file.tasks.is_empty() && file.snoozed.is_empty());
+        assert_eq!(file.notes, Notes::default());
+
+        let mut n = Notes::default();
+        notes::set_step(&mut n, "<m1@example.com>", "send the quote");
+        notes::set_order(&mut n, &["m2@example.com".into(), "m1@example.com".into()]);
+        let file = ExportFile {
+            notes: n.clone(),
+            snoozed: vec![Snoozed {
+                message_id: "<m3@example.com>".into(),
+                folder: "Snoozed".into(),
+                back: "INBOX".into(),
+                until: 1_900_000_000,
+            }],
+            ..file
+        };
+        let back: ExportFile = serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
+        assert_eq!(back.notes, n);
+        assert_eq!(back.snoozed, file.snoozed);
     }
 }

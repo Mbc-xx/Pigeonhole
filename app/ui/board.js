@@ -140,6 +140,7 @@ async function openBoard({ fromCache = false, retry = false } = {}) {
     loadFolders();
     loadKnownSenders();
     invoke("list_tasks").then(setTasks, () => setTasks([]));
+    invoke("list_notes").then(setNotes, () => setNotes(null));
     await Promise.all(state.columns.map((c) => loadColumn(c.folder)));
     refreshDrafts(0);
     wakeSnoozed();
@@ -521,6 +522,7 @@ function renderCards(folder) {
     columnSince(folder, all, false);
     if (state.fresh.has(folder)) setTimeout(sweepDone);
   }
+  forgetGone(folder, all);
   const unread = all.filter((c) => !c.seen).length;
   column.querySelector(".count").textContent = all.length;
   column.querySelector(".unread").textContent = unread ? `${unread} unread` : "";
@@ -598,7 +600,7 @@ function renderCards(folder) {
   };
   // Search results and All Mail come from several folders: each card carries its own.
   if (state.groupThreads) {
-    for (const g of groupsOf(list)) {
+    for (const g of byHand(folder, groupsOf(list), (g) => g.members, (g) => g.rep.card.date)) {
       const thread = g.members.length > 1 ? g : null;
       const rep = renderCard(g.rep.folder, g.rep.card, thread);
       container.append(rep);
@@ -615,7 +617,8 @@ function renderCards(folder) {
       }
     }
   } else {
-    for (const card of list) container.append(renderCard(card.__folder || folder, card));
+    const units = byHand(folder, list, (card) => [{ folder, card }], (card) => card.date);
+    for (const card of units) container.append(renderCard(card.__folder || folder, card));
   }
   const more = loadMore();
   if (more) container.append(more);
@@ -1103,13 +1106,17 @@ function renderCard(folder, card, group = null, { child = false } = {}) {
     if (unsent) date.prepend(unsent);
     const back = snoozeTag(members);
     if (back) date.prepend(back);
+    const step = stepLine(members);
+    if (step) main.append(step);
     c.append(from, main, date, actions);
     // Preview below, from under the sender to under the subject.
     if (card.preview && !child) c.append(el("div", "row-preview", card.preview));
     if (readerCard && readerCard.folder === folder && readerCard.card.uid === card.uid) c.classList.add("selected");
   } else {
     c.append(actions, fromLine, el("div", "subject", card.subject || "(no subject)"), el("div", "preview", card.preview));
-    const extra = [draftTag(members, folder), snoozeTag(members), todoTag(members), ...taskTags(members)].filter(Boolean);
+    const step = stepLine(members);
+    if (step) c.append(step);
+    const extra = [unplacedTag(folder, members), draftTag(members, folder), snoozeTag(members), todoTag(members), ...taskTags(members)].filter(Boolean);
     const tags = waitingTags(members) || (extra.length ? el("div", "wait-tags") : null);
     if (tags) {
       tags.append(...extra);
@@ -1219,8 +1226,17 @@ function openCardMenu(c, x, y) {
         : menuButton("junk", "Spam" + count, run((l) => fileMany(l, "junk", { conversation: !batch }))),
       menuButton("folder", "Move to…" + count, () => fillFolders(menu)),
       menuButton("link", "Link to a task…" + count, () => fillTasks(menu)),
+      ...(batch ? [] : [menuButton("step", stepOf(list) ? "Change the next step…" : "Next step…", () => editStep(c, targets(), { x, y }))]),
       menuButton("calendar", "Snooze…" + count, () => fillSnoozeMenu(menu, targets(), [menuButton("back", "Back", () => fill(menu)), el("div", "menu-sep")])),
     );
+    if (!batch && keepsOrder(folder) && !filtersOn()) {
+      sep();
+      menu.append(
+        menuButton("up", "Move to the top", run(() => placeAtEnd(folder, members, true))),
+        menuButton("down", "Move to the bottom", run(() => placeAtEnd(folder, members, false))),
+      );
+      if (state.notes.todo_order.length) menu.append(menuButton("calendar", "Back to newest first", run(() => (saveOrder([]), renderCards(folder)))));
+    }
     sep();
     if (batch) menu.append(menuButton("close", "Clear the selection", run(() => clearSelection())));
     else {
@@ -1257,21 +1273,35 @@ function openCardMenu(c, x, y) {
 
 function setupDropTarget(column) {
   const folder = column.dataset.folder;
+  // The to-do column also takes cards at a place: inside it they change the
+  // order, from another column they land where dropped (once there is an order).
+  const atPlace = (drag) => keepsOrder(folder) && !filtersOn() && (drag.folder === folder ? drag.members.every((m) => m.folder === folder) : state.notes.todo_order.length > 0);
   column.addEventListener("dragover", (ev) => {
-    if (!state.dragging || state.dragging.folder === folder) return;
+    const drag = state.dragging;
+    if (!drag || (drag.folder === folder && !atPlace(drag))) return;
     ev.preventDefault();
     ev.dataTransfer.dropEffect = "move";
-    column.classList.add("drop-target");
+    if (drag.folder !== folder) column.classList.add("drop-target");
+    if (atPlace(drag)) dropPlace(column, ev.clientY);
   });
   column.addEventListener("dragleave", (ev) => {
-    if (!column.contains(ev.relatedTarget)) column.classList.remove("drop-target");
+    if (column.contains(ev.relatedTarget)) return;
+    column.classList.remove("drop-target");
+    clearDropLine(column);
   });
   column.addEventListener("drop", (ev) => {
     ev.preventDefault();
     column.classList.remove("drop-target");
     const drag = state.dragging;
-    if (!drag || drag.folder === folder) return;
-    dropDragged(drag, folder);
+    clearDropLine(column);
+    if (!drag) return;
+    if (atPlace(drag)) {
+      const { cards, index } = dropPlace(column, ev.clientY);
+      clearDropLine(column);
+      saveOrder(orderAfterDrop(cards, index, drag.members));
+      if (drag.folder === folder) return renderCards(folder);
+    }
+    if (drag.folder !== folder) dropDragged(drag, folder);
   });
 }
 
