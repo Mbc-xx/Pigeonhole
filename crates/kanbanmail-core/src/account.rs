@@ -157,7 +157,7 @@ fn write_look(root: &Path, key: &str, look: Look) -> Result<()> {
         looks.insert(key, look);
     }
     let path = root.join(LOOKS_FILE);
-    std::fs::write(&path, toml::to_string_pretty(&looks)?).with_context(|| format!("writing {}", path.display()))
+    crate::files::write_atomic(&path, toml::to_string_pretty(&looks)?)
 }
 
 /// The chosen icons, by lowercase [`Account::key`].
@@ -234,7 +234,7 @@ fn active() -> &'static RwLock<Option<String>> {
 fn set_active(root: &Path, key: Option<String>) -> Result<()> {
     let path = root.join(ACTIVE_FILE);
     match &key {
-        Some(k) => std::fs::write(&path, k).with_context(|| format!("writing {}", path.display()))?,
+        Some(k) => crate::files::write_atomic(&path, k)?,
         None => {
             std::fs::remove_file(&path).ok();
         }
@@ -388,9 +388,7 @@ impl Account {
 
     pub fn save(&self) -> Result<()> {
         let path = account_path()?;
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        std::fs::write(&path, toml::to_string_pretty(self)?).with_context(|| format!("writing {}", path.display()))?;
-        Ok(())
+        crate::files::write_atomic(&path, toml::to_string_pretty(self)?)
     }
 }
 

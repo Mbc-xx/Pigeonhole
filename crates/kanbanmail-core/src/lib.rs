@@ -3,6 +3,7 @@
 pub mod account;
 pub mod advisories;
 pub mod board;
+pub mod files;
 pub mod imap;
 pub mod message;
 pub mod notes;

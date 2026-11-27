@@ -133,11 +133,7 @@ pub fn load() -> Report {
 
 pub fn save(report: &Report) -> Result<()> {
     let path = path()?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::write(&path, serde_json::to_string_pretty(report)?)
-        .with_context(|| format!("cannot write {}", path.display()))
+    crate::files::write_atomic(&path, serde_json::to_string_pretty(report)?)
 }
 
 /// Parses the list written by the build: `[[name, version, via], …]`.

@@ -40,9 +40,7 @@ fn load_from(dir: &Path) -> Result<Vec<Snoozed>> {
 }
 
 fn save_to(dir: &Path, list: &[Snoozed]) -> Result<()> {
-    std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join(FILE), serde_json::to_string_pretty(list)?)?;
-    Ok(())
+    crate::files::write_atomic(&dir.join(FILE), serde_json::to_string_pretty(list)?)
 }
 
 /// Adds emails (one snoozed again replaces its old entry), soonest first.

@@ -43,9 +43,7 @@ fn load_from(dir: &Path) -> Result<Notes> {
 }
 
 fn save_to(dir: &Path, notes: &Notes) -> Result<()> {
-    std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join(FILE), serde_json::to_string_pretty(notes)?)?;
-    Ok(())
+    crate::files::write_atomic(&dir.join(FILE), serde_json::to_string_pretty(notes)?)
 }
 
 /// Sets the next step of an email; an empty text removes it. The text is kept

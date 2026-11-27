@@ -1167,6 +1167,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .compose-rich:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .compose-rich img { max-width: 100%; }
+/* A remote picture held back while writing (it goes out with the email). */
+.compose-rich img[data-held-src] { display: inline-block; min-width: 24px; min-height: 24px; outline: 1px dashed var(--edge); outline-offset: -1px; background: var(--field); }
 .compose-rich blockquote { border-left: 3px solid #ccc; margin: 0 0 0 4px; padding-left: 10px; color: #555; }
 .invite {
   display: flex; align-items: center; gap: 12px; margin: 0 12px 10px; padding: 10px 12px;

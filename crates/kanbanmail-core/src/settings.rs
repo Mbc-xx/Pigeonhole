@@ -423,8 +423,7 @@ impl Settings {
     }
 
     fn save_to(&self, dir: &Path) -> Result<()> {
-        std::fs::create_dir_all(dir)?;
-        std::fs::write(dir.join("settings.toml"), toml::to_string_pretty(self)?)?;
+        crate::files::write_atomic(&dir.join("settings.toml"), toml::to_string_pretty(self)?)?;
         // The next load reads what was just written, whatever the clock says.
         *LOADED.lock().unwrap() = None;
         Ok(())

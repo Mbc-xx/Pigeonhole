@@ -43,9 +43,7 @@ fn load_from(dir: &Path) -> Result<Vec<Task>> {
 }
 
 fn save_to(dir: &Path, tasks: &[Task]) -> Result<()> {
-    std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join(FILE), serde_json::to_string_pretty(tasks)?)?;
-    Ok(())
+    crate::files::write_atomic(&dir.join(FILE), serde_json::to_string_pretty(tasks)?)
 }
 
 /// A Jira-style key ("WEB-12") in a piece of an address, if it is one.
