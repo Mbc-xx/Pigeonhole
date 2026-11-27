@@ -107,7 +107,12 @@ pub fn bare_id(id: &str) -> String {
 /// after a move) shares it, so it is downloaded once.
 fn body_key(folder: &str, uidvalidity: Option<u32>, card: &Card) -> String {
     match card.message_id.as_deref().map(bare_id).filter(|m| !m.is_empty()) {
-        Some(mid) => format!("mid:{mid}"),
+        // A copy without its attachments has the original's Message-ID: it
+        // must not be served the original's content, nor serve its own to it.
+        Some(mid) => match &card.removed_mark {
+            Some(mark) => format!("mid:{mid}#{mark}"),
+            None => format!("mid:{mid}"),
+        },
         None => format!("uid:{folder}/{}/{}", uidvalidity.unwrap_or(0), card.uid),
     }
 }
@@ -738,7 +743,47 @@ mod tests {
             to: "me@example.com".into(),
             to_only: "me@example.com".into(),
             size: 0,
+            removed_mark: None,
         }
+    }
+
+    #[test]
+    fn a_copy_without_attachments_is_never_served_the_original() {
+        let mut s = Store::in_memory().unwrap();
+        // The original was read, so its content (attachment included) is here.
+        s.save_cards(
+            "INBOX",
+            Some(1),
+            &[card(5, "Anna", "Slides", "slides@x", &[], 10)],
+            false,
+        )
+        .unwrap();
+        s.put_raw("INBOX", 5, b"original with the attachment").unwrap();
+        // Replaced on the server: the original moves to the Trash, the lighter
+        // copy (same Message-ID, marked) arrives with a new UID.
+        s.remove("INBOX", &[5]).unwrap();
+        s.save_cards(
+            "Trash",
+            Some(1),
+            &[card(1, "Anna", "Slides", "slides@x", &[], 10)],
+            false,
+        )
+        .unwrap();
+        let mut light = card(6, "Anna", "Slides", "slides@x", &[], 10);
+        light.removed_mark = Some("1795800000.1".into());
+        s.save_cards("INBOX", Some(1), &[light], false).unwrap();
+        assert_eq!(s.raw("INBOX", 6).unwrap(), None, "read again from the server");
+        assert_eq!(
+            s.raw("Trash", 1).unwrap().as_deref(),
+            Some(&b"original with the attachment"[..])
+        );
+        // And the lighter content does not take the original's place.
+        s.put_raw("INBOX", 6, b"lighter").unwrap();
+        assert_eq!(s.raw("INBOX", 6).unwrap().as_deref(), Some(&b"lighter"[..]));
+        assert_eq!(
+            s.raw("Trash", 1).unwrap().as_deref(),
+            Some(&b"original with the attachment"[..])
+        );
     }
 
     #[test]
