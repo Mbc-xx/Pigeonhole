@@ -477,7 +477,7 @@ async function openReader(folder, card, opts = {}) {
   const fromFile = folder === FILE_FOLDER;
   $("reader-trash").hidden = fromFile || folderKind(folder) === "trash";
   $("reader-archive").hidden = fromFile || folderKind(folder) === "archive";
-  for (const id of ["reader-pin", "reader-seen", "reader-spam", "reader-move", "reader-snooze", "reader-task"]) $(id).hidden = fromFile;
+  for (const id of ["reader-pin", "reader-seen", "reader-spam", "reader-move", "reader-snooze", "reader-task", "reader-step-btn"]) $(id).hidden = fromFile;
   const inJunk = folderKind(folder) === "junk";
   $("reader-spam").querySelector("span").textContent = inJunk ? "Not spam" : "Spam";
   $("reader-spam").title = inJunk ? "Move back to the Inbox" : "Move to Junk";

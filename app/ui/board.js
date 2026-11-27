@@ -697,14 +697,15 @@ function daysInColumn(ctx, members, mine = myAddresses()) {
   return Math.floor((ctx.now - entered) / 86400);
 }
 
-/// "Todo · 6 days" on an email that has waited too long in the to-do column.
+/// "6d" on an email that has waited too long in the to-do column (the
+/// only place it shows, so the column needs no naming).
 function todoTag(members) {
   const ctx = state.todoCtx;
   if (!ctx) return null;
   const days = daysInColumn(ctx, members);
   if (days < state.todoDays) return null;
-  const tag = el("span", "wait-tag " + (days >= 2 * state.todoDays ? "overdue" : "late"), `To do · ${days} days`);
-  tag.title = `In this column for ${days} days`;
+  const tag = el("span", "wait-tag " + (days >= 2 * state.todoDays ? "overdue" : "late"), `${days}d`);
+  tag.title = `In the to-do column for ${days} days`;
   return tag;
 }
 
@@ -826,7 +827,7 @@ function waitingTags(members) {
   const { answer, lastMine } = waitingAnswer(members, ctx);
   const box = el("div", "wait-tags");
   if (answer) {
-    const tag = el("button", "wait-tag replied", "↩ Replied · " + shortName(answer.card.from));
+    const tag = el("button", "wait-tag replied", "↩ " + shortName(answer.card.from));
     tag.type = "button";
     tag.draggable = false;
     tag.title = `${answer.card.from} answered on ${formatDate(answer.card.date, true)}: open the answer`;
@@ -840,8 +841,8 @@ function waitingTags(members) {
     const started = Math.max(entered, lastMine);
     const days = Math.floor((ctx.now - started) / 86400);
     if (days >= state.waitingDays) {
-      const tag = el("span", "wait-tag late", `Waiting ${days} days`);
-      tag.title = "No answer yet in this conversation";
+      const tag = el("span", "wait-tag late", `${days}d`);
+      tag.title = `No answer yet: waiting for ${days} days`;
       box.append(tag);
     }
   }
@@ -1097,26 +1098,17 @@ function renderCard(folder, card, group = null, { child = false } = {}) {
       b.title = `${unreadInThread} unread of ${members.length} emails in this conversation`;
       from.append(b);
     }
-    const tags = waitingTags(members);
-    if (tags) date.prepend(tags);
-    date.prepend(...taskTags(members));
-    const todoLate = todoTag(members);
-    if (todoLate) date.prepend(todoLate);
-    const unsent = draftTag(members, folder);
-    if (unsent) date.prepend(unsent);
-    const back = snoozeTag(members);
-    if (back) date.prepend(back);
-    const step = stepLine(members);
-    if (step) main.append(step);
+    // Urgent first (unsent reply, late), then my next step, tasks and snooze.
+    const rowTags = [draftTag(members, folder), todoTag(members), stepTag(members), ...taskTags(members), snoozeTag(members), waitingTags(members)].filter(Boolean);
+    date.prepend(...rowTags);
     c.append(from, main, date, actions);
     // Preview below, from under the sender to under the subject.
     if (card.preview && !child) c.append(el("div", "row-preview", card.preview));
     if (readerCard && readerCard.folder === folder && readerCard.card.uid === card.uid) c.classList.add("selected");
   } else {
     c.append(actions, fromLine, el("div", "subject", card.subject || "(no subject)"), el("div", "preview", card.preview));
-    const step = stepLine(members);
-    if (step) c.append(step);
-    const extra = [unplacedTag(folder, members), draftTag(members, folder), snoozeTag(members), todoTag(members), ...taskTags(members)].filter(Boolean);
+    // Urgent first (unsent reply, late), then my next step, tasks, snooze and "New here".
+    const extra = [draftTag(members, folder), todoTag(members), stepTag(members), ...taskTags(members), snoozeTag(members), unplacedTag(folder, members)].filter(Boolean);
     const tags = waitingTags(members) || (extra.length ? el("div", "wait-tags") : null);
     if (tags) {
       tags.append(...extra);

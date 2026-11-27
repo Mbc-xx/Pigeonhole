@@ -24,20 +24,21 @@ function stepOf(members) {
   return null;
 }
 
-/// The step on a card: one line under the preview, a click changes it.
-function stepLine(members) {
+/// The step on a card: a small tag beside the others (the whole text on
+/// hover), a click changes it.
+function stepTag(members) {
   const step = stepOf(members);
   if (!step) return null;
-  const line = el("button", "next-step");
-  line.type = "button";
-  line.draggable = false;
-  line.title = "Next step: click to change it";
-  line.append(icon("step"), el("span", "", step.text));
-  line.addEventListener("click", (ev) => {
+  const tag = el("button", "step-tag");
+  tag.type = "button";
+  tag.draggable = false;
+  tag.title = `Next step: ${step.text}\nClick to change it`;
+  tag.append(icon("step"), el("span", "", step.text));
+  tag.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    editStep(line, members);
+    editStep(tag, members);
   });
-  return line;
+  return tag;
 }
 
 /// A small field to write, change or remove the next step.
@@ -73,24 +74,20 @@ async function saveStep(members, text) {
   }
 }
 
-/// The open email's step in the reader, or a quiet button to add one.
+/// The open email's step, beside its tasks; the button among the actions
+/// says whether there is one.
 function renderReaderStep() {
-  const box = $("reader-step");
-  if (!box) return;
-  if (!readerCard || readerCard.folder === FILE_FOLDER) return box.replaceChildren();
-  const members = [readerCard];
-  const line = stepLine(members);
-  if (line) return box.replaceChildren(line);
-  const add = el("button", "add-step");
-  add.type = "button";
-  add.append(icon("plus"), el("span", "", "Next step"));
-  add.title = "Write what to do next with this email";
-  add.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    editStep(add, members);
-  });
-  box.replaceChildren(add);
+  renderReaderTasks();
+  const has = !!(readerCard && stepOf([readerCard]));
+  $("reader-step-btn").classList.toggle("has-step", has);
+  $("reader-step-btn").title = has ? "Change the next step…" : "Next step: write what to do next with this email…";
 }
+
+$("reader-step-btn").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  if (document.querySelector(".conv-menu.task-menu")) return closeConvMenu();
+  if (readerCard) editStep($("reader-step-btn"), [readerCard]);
+});
 
 // ---------- the to-do column in my order ----------
 

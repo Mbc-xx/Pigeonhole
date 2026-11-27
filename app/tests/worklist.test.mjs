@@ -96,7 +96,7 @@ test("a next step shows on the card, follows the replies and is one per conversa
     handlers,
   });
   await tick();
-  const steps = () => app.get(`[...columnEl("${TODO}").querySelectorAll(".card")].map((c) => [+c.dataset.uid, c.querySelector(".next-step")?.textContent || ""])`);
+  const steps = () => app.get(`[...columnEl("${TODO}").querySelectorAll(".card")].map((c) => [+c.dataset.uid, c.querySelector(".step-tag")?.textContent || ""])`);
   // The reply to email 1 shows its step too.
   assert.deepEqual(steps(), [[1, "send the quote"], [2, "send the quote"], [3, ""]]);
   // Written on the conversation, it replaces the old one.
@@ -110,14 +110,17 @@ test("a next step shows on the card, follows the replies and is one per conversa
   assert.deepEqual(steps(), [[1, ""], [2, ""], [3, ""]]);
 });
 
-test("the reader shows the next step, or a button to add one", async () => {
+test("the reader shows the next step beside its tasks, and its icon among the actions", async () => {
   const { handlers } = notesBackend({ next: { "m3@example.com": "wait for the invoice" } });
   const app = await openApp({ data: { [TODO]: [card(1), card(3)] }, handlers });
   await tick();
   await app.run(`openReader("${TODO}", state.cards["${TODO}"][0])`);
   await tick();
-  assert.match(app.$("reader-step").textContent, /^Next step$/);
+  assert.equal(app.run(`$("reader-tasks").querySelector(".step-tag")`), null);
+  assert.equal(app.$("reader-step-btn").classList.contains("has-step"), false);
   await app.run(`openReader("${TODO}", state.cards["${TODO}"][1])`);
   await tick();
-  assert.equal(app.$("reader-step").textContent, "wait for the invoice");
+  assert.equal(app.run(`$("reader-tasks").querySelector(".step-tag").textContent`), "wait for the invoice");
+  assert.equal(app.$("reader-tasks").hidden, false);
+  assert.equal(app.$("reader-step-btn").classList.contains("has-step"), true, "the action icon says there is one");
 });

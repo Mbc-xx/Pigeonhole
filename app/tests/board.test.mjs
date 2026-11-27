@@ -43,8 +43,8 @@ test("a late email in Todo is tagged and counted in the column title", async () 
   });
   const text = columnText(app, "INBOX.Todo");
   assert.match(text, /2 late/);
-  assert.match(text, /To do · 6 days/);
-  assert.match(text, /To do · 11 days/);
+  const tags = app.get(`[...columnEl("INBOX.Todo").querySelectorAll(".wait-tag")].map((t) => t.textContent)`);
+  assert.deepEqual(tags, ["6d", "11d"]);
   assert.equal(app.run(`columnEl("INBOX.Todo").querySelectorAll(".wait-tag.overdue").length`), 1, "twice the time is overdue");
 });
 
@@ -58,14 +58,14 @@ test("an answer in the Inbox marks the email in Waiting as replied", async () =>
     data: waiting({ INBOX: [card(2, { from: "Marco Gialli", message_id: "<r1@x>", thread_refs: ["<w1@x>"], date: now - DAY })] }),
   });
   await tick();
-  assert.match(columnText(app, "INBOX.Waiting"), /↩ Replied · Marco/);
+  assert.match(columnText(app, "INBOX.Waiting"), /↩ Marco/);
   assert.equal(app.run("state.today.replied"), 1);
 });
 
 test("without an answer the email shows how long it has waited", async () => {
   const app = await openApp({ data: waiting() });
   await tick();
-  assert.match(columnText(app, "INBOX.Waiting"), /Waiting 9 days/);
+  assert.deepEqual(app.get(`[...columnEl("INBOX.Waiting").querySelectorAll(".wait-tag")].map((t) => t.textContent)`), ["9d"]);
   assert.doesNotMatch(columnText(app, "INBOX.Waiting"), /Replied/);
 });
 

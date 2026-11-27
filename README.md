@@ -50,12 +50,12 @@ variables come from there.
   Board; a new name creates the folder. Drag cards between columns, or onto a
   folder in the sidebar. Columns resize by dragging their edge and fill the
   window.
-- **Waiting.** In the column of emails you wait on, a card shows "↩ Replied" as
-  soon as an answer arrives in the conversation (click it to open the answer),
-  and "Waiting N days" once it has waited longer than you chose (3 days by
+- **Waiting.** In the column of emails you wait on, a card shows "↩" and the name of who
+  answered as soon as an answer arrives in the conversation (click it to open the answer),
+  and the days waited ("4d") once it has waited longer than you chose (3 days by
   default). A reminder you send restarts the count. A notification tells you
   when an answer arrives.
-- **To do.** In the Todo column a card shows "To do · N days" after the time you
+- **To do.** In the Todo column a card shows the days waited ("6d") after the time you
   chose (5 days by default), in red after twice as long, and the column title
   counts the late ones. A conversation counts from its newest email written by
   someone else.
