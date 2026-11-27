@@ -61,8 +61,7 @@ impl Board {
     pub fn load_or_create() -> Result<Board> {
         let path = board_path()?;
         if !path.exists() {
-            std::fs::create_dir_all(path.parent().unwrap())?;
-            std::fs::write(&path, DEFAULT_BOARD).with_context(|| format!("writing {}", path.display()))?;
+            crate::files::write_atomic(&path, DEFAULT_BOARD)?;
         }
         let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         let board: Board = toml::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
@@ -82,6 +81,6 @@ impl Board {
             .collect();
         let body = toml::to_string_pretty(self)?;
         let path = board_path()?;
-        std::fs::write(&path, format!("{header}\n{body}")).with_context(|| format!("writing {}", path.display()))
+        crate::files::write_atomic(&path, format!("{header}\n{body}"))
     }
 }

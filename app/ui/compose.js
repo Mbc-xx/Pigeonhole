@@ -35,7 +35,7 @@ function composeDraft() {
     bcc: recipientValue("compose-bcc"),
     subject: $("compose-subject").value,
     body: compose.rich ? richText() : $("compose-body").value,
-    html: compose.rich ? $("compose-rich").innerHTML : null,
+    html: compose.rich ? releasedHtml($("compose-rich").innerHTML) : null,
     in_reply_to: compose.context?.in_reply_to ?? null,
     references: compose.context?.references ?? [],
     message_id: compose.messageId,
@@ -442,8 +442,8 @@ function richMarkdown() {
 }
 
 function mdFromHtml(html) {
-  const root = document.createElement("div");
-  root.innerHTML = html;
+  // An inert document: pictures in it do not load.
+  const root = new DOMParser().parseFromString(html, "text/html").body;
   const md = mdBlocks(root).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "");
   return md.replace(/^--$/m, "-- "); // the signature line keeps its space
 }
@@ -864,6 +864,63 @@ function emailBodyHtml(msg) {
   if (!msg.html) return textToHtml(msg.text || "");
   const doc = new DOMParser().parseFromString(msg.html, "text/html");
   for (const n of doc.querySelectorAll("style, link, meta, title, base, script")) n.remove();
+  if (!readerRemoteAllowed) holdRemote(doc.body);
+  return doc.body.innerHTML;
+}
+
+// Remote images of a quoted email or a reopened draft would load while the
+// email is written, telling the sender it was read. Held back, they show as
+// a placeholder and go out unchanged with the email.
+const REMOTE = /^\s*(https?:)?\/\//i;
+const REMOTE_URL = /url\(\s*['"]?\s*(https?:)?\/\//i;
+const REMOTE_TITLE = "Remote picture: not loaded while you write, it stays in the email";
+
+/// Holds back the remote pictures under `root` (a node of an inert document);
+/// the signature's own pictures stay.
+function holdRemote(root) {
+  for (const n of root.querySelectorAll("[src], [srcset], [background], [style]")) {
+    if (n.closest("[data-signature]")) continue;
+    if (n.tagName === "IMG" && REMOTE.test(n.getAttribute("src") || "")) {
+      n.setAttribute("data-held-src", n.getAttribute("src"));
+      n.removeAttribute("src");
+      if (!n.title) n.title = REMOTE_TITLE;
+    }
+    for (const attr of ["srcset", "background"]) {
+      const value = n.getAttribute(attr);
+      if (value && (attr === "srcset" || REMOTE.test(value))) {
+        n.setAttribute("data-held-" + attr, value);
+        n.removeAttribute(attr);
+      }
+    }
+    const style = n.getAttribute("style");
+    if (style && REMOTE_URL.test(style)) {
+      n.setAttribute("data-held-style", style);
+      n.setAttribute("style", style.replace(/url\([^)]*\)/gi, "none"));
+    }
+  }
+}
+
+/// HTML for the editor, with remote pictures held back unless they may load.
+function heldHtml(html, allowed) {
+  if (!html || allowed) return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  holdRemote(doc.body);
+  return doc.body.innerHTML;
+}
+
+/// The editor's HTML as it is sent: held pictures back in place.
+function releasedHtml(html) {
+  if (!html || !html.includes("data-held-")) return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  for (const n of doc.querySelectorAll("[data-held-src], [data-held-srcset], [data-held-background], [data-held-style]")) {
+    for (const attr of ["src", "srcset", "background", "style"]) {
+      const held = n.getAttribute("data-held-" + attr);
+      if (held === null) continue;
+      n.setAttribute(attr, held);
+      n.removeAttribute("data-held-" + attr);
+    }
+    if (n.title === REMOTE_TITLE) n.removeAttribute("title");
+  }
   return doc.body.innerHTML;
 }
 
@@ -1191,6 +1248,6 @@ async function reopenPending(pending, fromDraft = true) {
   compose.markdown = pending.markdown;
   compose.richSaved = null;
   renderFormat();
-  if (pending.rich) $("compose-rich").innerHTML = d.html || "";
+  if (pending.rich) $("compose-rich").innerHTML = heldHtml(d.html || "", state.loadRemoteImages);
   compose.initial = compose.saved = composeSnapshot();
 }

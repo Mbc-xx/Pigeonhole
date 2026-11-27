@@ -65,3 +65,24 @@ test("the eraser clears only what is wholly selected and keeps lists and quotes"
   // Nothing selected: nothing to do.
   assert.equal(app.run(`getSelection().collapseToStart(), clearFormatting($("compose-rich"))`), false);
 });
+
+test("remote pictures of a quoted email wait while writing and go out unchanged", async () => {
+  const app = await composing();
+  const quoted = '<p>Hi <img src="https://track.example/p.gif" width="1"></p><div style="background:url(https://img.example/bg.png) no-repeat">x</div><img src="data:image/png;base64,AAAA"><div data-signature><img src="https://logo.example/me.png"></div>';
+  app.run(`readerRemoteAllowed = false`);
+  const held = app.run(`emailBodyHtml({ html: ${JSON.stringify(quoted)} })`);
+  assert.doesNotMatch(held, /(?<!-)src="https:\/\/track/, "the tracker does not load");
+  assert.match(held, /style="background:none no-repeat"/, "nor the background");
+  assert.match(held, /data:image\/png/, "pictures inside the email stay");
+  assert.match(held, /(?<!-)src="https:\/\/logo\.example/, "the signature's own picture stays");
+  // What is sent is the email as it was.
+  app.run(`$("compose-rich").innerHTML = ${JSON.stringify(held)}`);
+  const sent = app.run(`composeDraft().html`);
+  assert.match(sent, /<img[^>]*(?<!-)src="https:\/\/track\.example\/p\.gif"/);
+  assert.doesNotMatch(sent, /Remote picture/, "the placeholder title goes away");
+  assert.match(sent, /(?<!-)style="background:url\(https:\/\/img\.example\/bg\.png\) no-repeat"/);
+  assert.doesNotMatch(sent, /data-held/);
+  // Pictures allowed in the reader load in the reply too.
+  app.run(`readerRemoteAllowed = true`);
+  assert.match(app.run(`emailBodyHtml({ html: ${JSON.stringify(quoted)} })`), /(?<!-)src="https:\/\/track/);
+});

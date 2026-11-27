@@ -1903,7 +1903,89 @@ async fn save_attachment(
 ) -> CmdResult<Option<String>> {
     let raw = raw_email(&state, &folder, uid).await?;
     let (name, bytes) = kanbanmail_core::message::attachment(&raw, index).ok_or("attachment not found")?;
-    save_file(&window, &safe_file_name(&name), &bytes).await
+    let saved = save_file(&window, &safe_file_name(&name), &bytes).await?;
+    if let Some(path) = &saved {
+        mark_downloaded(std::path::Path::new(path));
+    }
+    Ok(saved)
+}
+
+/// Marks a file that came with an email as downloaded, as Mail, Outlook and
+/// browsers do: the system then warns before opening a program or a script
+/// from it (Gatekeeper on macOS, SmartScreen and Office's Protected View on
+/// Windows). Best effort: a file system without the mark keeps the file as is.
+fn mark_downloaded(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = std::process::Command::new("/usr/bin/xattr")
+            .args(["-w", "com.apple.quarantine", &format!("0081;{stamp:x};Pigeonhole;")])
+            .arg(path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let mut stream = path.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        let _ = std::fs::write(stream, "[ZoneTransfer]\r\nZoneId=3\r\n");
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = path;
+}
+
+/// Kinds of file that run something when opened: they are never opened
+/// straight from an email, only saved for the user to decide.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // macOS previews with Quick Look
+fn runs_when_opened(name: &str) -> bool {
+    const RISKY: &[&str] = &[
+        "exe",
+        "com",
+        "bat",
+        "cmd",
+        "scr",
+        "pif",
+        "cpl",
+        "msi",
+        "msp",
+        "msc",
+        "lnk",
+        "url",
+        "reg",
+        "hta",
+        "js",
+        "jse",
+        "vbs",
+        "vbe",
+        "wsf",
+        "wsh",
+        "ps1",
+        "psm1",
+        "jar",
+        "appref-ms",
+        "application",
+        "gadget",
+        "inf",
+        "scf",
+        "chm",
+        "iso",
+        "img",
+        "vhd",
+        "vhdx",
+        "app",
+        "command",
+        "sh",
+        "pkg",
+        "dmg",
+        "terminal",
+        "workflow",
+    ];
+    let lower = name.trim_end_matches(['.', ' ']).to_ascii_lowercase();
+    lower.rsplit_once('.').is_some_and(|(_, ext)| RISKY.contains(&ext))
 }
 
 /// Keeps only characters that are safe in a file name on every system.
@@ -1992,6 +2074,7 @@ async fn attachment_copy(state: &AppState, folder: &str, uid: u32, index: usize)
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(safe_file_name(&name));
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    mark_downloaded(&path);
     Ok(path)
 }
 
@@ -2000,6 +2083,14 @@ async fn attachment_copy(state: &AppState, folder: &str, uid: u32, index: usize)
 #[tauri::command]
 async fn preview_attachment(folder: String, uid: u32, index: usize, state: State<'_, AppState>) -> CmdResult<()> {
     let path = attachment_copy(&state, &folder, uid, index).await?;
+    // Quick Look only shows a file; the default app of Windows and Linux would
+    // run a program or a script.
+    #[cfg(not(target_os = "macos"))]
+    if runs_when_opened(&path.to_string_lossy()) {
+        return Err(
+            "for safety this kind of file is not opened from an email: save it, then decide whether to open it".into(),
+        );
+    }
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("qlmanage")
         .arg("-p")
@@ -2340,7 +2431,7 @@ async fn import_settings(json: String, state: State<'_, AppState>) -> CmdResult<
     if !file.board_toml.trim().is_empty() {
         toml::from_str::<Board>(&file.board_toml)
             .map_err(|e| format!("the board columns in the file are not valid: {e}"))?;
-        std::fs::write(board_path().map_err(err)?, &file.board_toml).map_err(|e| e.to_string())?;
+        kanbanmail_core::files::write_atomic(&board_path().map_err(err)?, &file.board_toml).map_err(err)?;
     }
     file.settings.save().map_err(err)?;
     file.settings.share_with_other_accounts().map_err(err)?;
@@ -2573,6 +2664,7 @@ async fn add_to_calendar(folder: String, uid: u32, state: State<'_, AppState>) -
         .ok_or("this email has no invitation")?;
     let path = std::env::temp_dir().join(format!("kanbanmail-{}.ics", uid));
     std::fs::write(&path, invite.ics).map_err(|e| e.to_string())?;
+    mark_downloaded(&path);
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("open").arg(&path).spawn();
     #[cfg(target_os = "windows")]
@@ -2724,6 +2816,52 @@ mod tests {
         let back = serde_json::to_value(&view).unwrap();
         assert_eq!(back["email"], "a@example.com");
         assert_eq!(back["undo_seconds"], 15);
+    }
+
+    #[test]
+    fn programs_and_scripts_are_never_opened_from_an_email() {
+        for name in [
+            "setup.exe",
+            "Invoice.PDF.js",
+            "run.bat",
+            "x.lnk",
+            "a.ps1",
+            "trick.exe. ",
+            "disk.iso",
+            "Tool.app",
+        ] {
+            assert!(runs_when_opened(name), "{name}");
+        }
+        for name in [
+            "report.pdf",
+            "photo.JPG",
+            "notes.txt",
+            "sheet.xlsx",
+            "exe",
+            "archive.zip",
+            "invite.ics",
+        ] {
+            assert!(!runs_when_opened(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_marked_file_keeps_its_content() {
+        let path = std::env::temp_dir().join(format!("pigeonhole-mark-{}.txt", std::process::id()));
+        std::fs::write(&path, "hello").unwrap();
+        mark_downloaded(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+        #[cfg(target_os = "macos")]
+        {
+            let out = std::process::Command::new("/usr/bin/xattr")
+                .arg("-p")
+                .arg("com.apple.quarantine")
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(String::from_utf8_lossy(&out.stdout).contains(";Pigeonhole;"));
+        }
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]
