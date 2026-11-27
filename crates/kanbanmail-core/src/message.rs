@@ -44,6 +44,33 @@ pub struct AttachmentInfo {
     pub size: usize,
 }
 
+/// An attachment removed by this app: "slides.pdf, 1.2 MB" and the day.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RemovedAttachment {
+    pub what: String,
+    pub day: String,
+}
+
+/// How the note left in place of a removed attachment starts.
+const REMOVED_NOTE: &str = "[Attachment removed by Pigeonhole on ";
+
+/// The notes of removed attachments, among the text parts of the email.
+fn removed_attachments(m: &mail_parser::Message<'_>) -> Vec<RemovedAttachment> {
+    m.text_body()
+        .chain(m.attachments())
+        .filter(|p| matches!(p.kind(), mail_parser::PartKind::Text))
+        .filter_map(|p| {
+            let text = String::from_utf8_lossy(&p.decoded()).into_owned();
+            let rest = text.trim().strip_prefix(REMOVED_NOTE)?.strip_suffix(']')?.to_string();
+            let (day, what) = rest.split_once(": ")?;
+            Some(RemovedAttachment {
+                what: what.to_string(),
+                day: day.to_string(),
+            })
+        })
+        .collect()
+}
+
 /// The full content of an email, for the reader.
 #[derive(Debug, Clone, Serialize)]
 pub struct MessageView {
@@ -79,6 +106,8 @@ pub struct MessageView {
     pub draft_format: Option<String>,
     /// How to leave the mailing list the email comes from, if it says.
     pub unsubscribe: Option<Unsubscribe>,
+    /// Attachments taken out by this app to save space: the notes left in their place.
+    pub removed: Vec<RemovedAttachment>,
 }
 
 /// The List-Unsubscribe header (RFC 2369) and its one-click form (RFC 8058).
@@ -336,6 +365,7 @@ pub fn parse_view(raw: &[u8]) -> MessageView {
             attachments: Vec::new(),
             draft_format: None,
             unsubscribe: None,
+            removed: Vec::new(),
         };
     };
     // Use HTML only if the message really has some: otherwise mail-parser
@@ -387,6 +417,7 @@ pub fn parse_view(raw: &[u8]) -> MessageView {
         header("List-Unsubscribe").and_then(|h| parse_unsubscribe(&h, header("List-Unsubscribe-Post").as_deref()));
     MessageView {
         unsubscribe,
+        removed: removed_attachments(&m),
         from: sender(m.from()),
         reply_address: first_address(m.reply_to())
             .or_else(|| first_address(m.from()))
@@ -478,6 +509,96 @@ pub fn attachment(raw: &[u8], index: usize) -> Option<(String, Vec<u8>)> {
         .map(str::to_string)
         .unwrap_or_else(|| format!("attachment-{}", index + 1));
     Some((name, part.decoded().into_owned()))
+}
+
+/// "4.2 MB", "320 KB", for the note left where an attachment was.
+fn human_size(bytes: usize) -> String {
+    match bytes {
+        b if b < 1024 => format!("{b} B"),
+        b if b < 1024 * 1024 => format!("{} KB", b.div_ceil(1024)),
+        b => format!("{:.1} MB", b as f64 / 1024.0 / 1024.0),
+    }
+}
+
+/// The email with the chosen attachments (by their `index`, as listed in the
+/// reader) replaced by a short note that names them, said to be removed on
+/// `day`. Everything else, headers included, stays byte for byte, so the
+/// email keeps its Message-ID, its conversation and its text. Signed or
+/// encrypted emails are refused: changing them would break the signature.
+/// Returns the new email and the bytes saved.
+pub fn strip_attachments(raw: &[u8], indexes: &[usize], day: &str) -> Result<(Vec<u8>, usize), String> {
+    use base64::Engine;
+    let m = MessageParser::default().parse(raw).ok_or("the email cannot be read")?;
+    let top = m
+        .content_type()
+        .map(|ct| format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("")).to_lowercase())
+        .unwrap_or_default();
+    if matches!(
+        top.as_str(),
+        "multipart/signed" | "multipart/encrypted" | "application/pkcs7-mime" | "application/x-pkcs7-mime"
+    ) {
+        return Err("This email is signed or encrypted: removing attachments would break it.".into());
+    }
+    let nl: &[u8] = if raw.windows(2).any(|w| w == b"\r\n") {
+        b"\r\n"
+    } else {
+        b"\n"
+    };
+    let base = raw.as_ptr() as usize;
+    let mut cuts: Vec<(usize, usize, Vec<u8>)> = Vec::new();
+    for (index, part) in m.attachments().enumerate() {
+        if !indexes.contains(&index) {
+            continue;
+        }
+        let (start, end) = (part.offset_header() as usize, part.offset_end() as usize);
+        // Only a part written as such in this email can be cut out: not the
+        // whole email, nor one inside a forwarded email.
+        let here = part.raw().as_ptr() as usize == base + start && end <= raw.len() && start < end;
+        if start == 0 || !here {
+            return Err(
+                "This attachment cannot be removed (it is inside a forwarded email or is the whole email).".into(),
+            );
+        }
+        let name: String = part
+            .attachment_name()
+            .unwrap_or("attachment")
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect();
+        let size = part.decoded_len();
+        let note = format!("{REMOVED_NOTE}{day}: {name}, {}]", human_size(size));
+        let encoded = base64::engine::general_purpose::STANDARD.encode(note.as_bytes());
+        let mut new = Vec::new();
+        for line in [
+            "Content-Type: text/plain; charset=utf-8",
+            "Content-Disposition: inline",
+            "Content-Transfer-Encoding: base64",
+            "",
+        ] {
+            new.extend_from_slice(line.as_bytes());
+            new.extend_from_slice(nl);
+        }
+        for (i, chunk) in encoded.as_bytes().chunks(76).enumerate() {
+            if i > 0 {
+                new.extend_from_slice(nl);
+            }
+            new.extend_from_slice(chunk);
+        }
+        cuts.push((start, end, new));
+    }
+    if cuts.len() != indexes.iter().collect::<std::collections::BTreeSet<_>>().len() {
+        return Err("Some of the attachments are no longer in the email.".into());
+    }
+    cuts.sort_by_key(|c| c.0);
+    if cuts.windows(2).any(|w| w[1].0 < w[0].1) {
+        return Err("These attachments overlap: remove them one at a time.".into());
+    }
+    let mut out = raw.to_vec();
+    for (start, end, new) in cuts.into_iter().rev() {
+        out.splice(start..end, new);
+    }
+    let saved = raw.len().saturating_sub(out.len());
+    Ok((out, saved))
 }
 
 fn has_remote_content(html: &str) -> bool {
@@ -890,5 +1011,79 @@ JVBERi0xLjQ=\r\n\
         assert_eq!(&outlook[..quote_start_text(outlook).unwrap()], "Ciao\n\n");
         assert_eq!(quote_start_text("> only a quote\n"), None);
         assert_eq!(quote_start_text("No quote.\nJust text.\n"), None);
+    }
+
+    const WITH_FILES: &str = "From: Anna Bianchi <anna@example.com>\r\n\
+To: me@example.com\r\n\
+Subject: Slides\r\n\
+Message-ID: <slides@example.com>\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=\"b1\"\r\n\
+\r\n\
+--b1\r\n\
+Content-Type: text/plain; charset=utf-8\r\n\
+\r\n\
+Here are the slides.\r\n\
+--b1\r\n\
+Content-Type: application/pdf; name=\"slides.pdf\"\r\n\
+Content-Disposition: attachment; filename=\"slides.pdf\"\r\n\
+Content-Transfer-Encoding: base64\r\n\
+\r\n\
+JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSPj4Kc3RyZWFtCnRoaXMgaXMgYSBmYWtlIHBkZgplbmRzdHJlYW0K\r\n\
+JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSPj4Kc3RyZWFtCnRoaXMgaXMgYSBmYWtlIHBkZgplbmRzdHJlYW0K\r\n\
+--b1\r\n\
+Content-Type: image/png; name=\"photo.png\"\r\n\
+Content-Disposition: attachment; filename=\"photo.png\"\r\n\
+Content-Transfer-Encoding: base64\r\n\
+\r\n\
+iVBORw0KGgo=\r\n\
+--b1--\r\n";
+
+    #[test]
+    fn removing_an_attachment_leaves_a_note_and_the_rest_unchanged() {
+        let raw = WITH_FILES.as_bytes();
+        let (out, saved) = strip_attachments(raw, &[0], "27 Nov 2026").unwrap();
+        assert!(saved > 100, "{saved}");
+        let text = String::from_utf8(out.clone()).unwrap();
+        // Headers and text byte for byte, the other attachment too.
+        let head = WITH_FILES
+            .split("--b1\r\nContent-Type: application/pdf")
+            .next()
+            .unwrap();
+        assert!(text.starts_with(head));
+        assert!(text.ends_with("--b1\r\nContent-Type: image/png; name=\"photo.png\"\r\nContent-Disposition: attachment; filename=\"photo.png\"\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n--b1--\r\n"));
+        // It reads as before, with the note in place of the PDF.
+        let view = parse_view(&out);
+        assert_eq!(view.message_id.as_deref(), Some("slides@example.com"));
+        let names: Vec<_> = view.attachments.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["photo.png"]);
+        assert_eq!(view.text.as_deref(), Some("Here are the slides."));
+        assert_eq!(
+            view.removed,
+            [RemovedAttachment {
+                what: "slides.pdf, 162 B".into(),
+                day: "27 Nov 2026".into()
+            }]
+        );
+        // Both at once.
+        let (both, _) = strip_attachments(raw, &[1, 0], "27 Nov 2026").unwrap();
+        assert!(parse_view(&both).attachments.is_empty());
+    }
+
+    #[test]
+    fn signed_emails_and_whole_email_attachments_are_left_alone() {
+        let signed = WITH_FILES.replace(
+            "multipart/mixed; boundary=\"b1\"",
+            "multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=\"b1\"",
+        );
+        assert!(strip_attachments(signed.as_bytes(), &[0], "x")
+            .unwrap_err()
+            .contains("signed"));
+        let alone = "From: a@example.com\r\nSubject: s\r\nContent-Type: application/pdf; name=\"a.pdf\"\r\nContent-Disposition: attachment; filename=\"a.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n";
+        assert!(strip_attachments(alone.as_bytes(), &[0], "x").is_err());
+        assert!(
+            strip_attachments(WITH_FILES.as_bytes(), &[5], "x").is_err(),
+            "an index that is not there"
+        );
     }
 }

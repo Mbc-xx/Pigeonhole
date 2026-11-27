@@ -47,9 +47,23 @@ function formatSize(bytes) {
   return (bytes / 1024 ** 3).toFixed(1) + " GB";
 }
 
-function renderAttachments(folder, uid, list) {
+function renderAttachments(folder, uid, list, removed = []) {
   const box = $("reader-attachments");
-  box.hidden = !list.length;
+  box.hidden = !list.length && !removed.length;
+  // Taken out earlier to free space: only their name is left.
+  const gone = removed.map((r) => {
+    const chip = el("span", "attachment removed");
+    chip.title = `Removed on ${r.day} to free space on the server`;
+    chip.append(icon("paperclip"), el("span", "att-name", r.what), el("span", "att-size muted", "removed"));
+    return chip;
+  });
+  const cut = list.length && folder !== FILE_FOLDER ? el("button", "att-remove") : null;
+  if (cut) {
+    cut.type = "button";
+    cut.title = "Take the attachments out of this email on the server, to free space (saving them first)";
+    cut.append(icon("trash"), el("span", "", "Remove…"));
+    cut.addEventListener("click", () => removeAttachments(folder, uid, list));
+  }
   box.replaceChildren(
     ...list.map((a) => {
       const chip = el("button", "attachment");
@@ -82,7 +96,60 @@ function renderAttachments(folder, uid, list) {
       });
       return chip;
     }),
+    ...gone,
+    ...(cut ? [cut] : []),
   );
+}
+
+/// Frees space on the server: the chosen attachments leave the email, after
+/// being saved here; a note with their name stays in their place, and the
+/// original goes to the Trash until it is emptied.
+async function removeAttachments(folder, uid, list) {
+  const extra = el("div", "remove-atts");
+  const boxes = list.map((a) => {
+    const label = el("label", "toggle");
+    const cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = true;
+    cb.value = String(a.index);
+    label.append(cb, document.createTextNode(` ${a.name} · ${formatSize(a.size)}`));
+    extra.append(label);
+    return cb;
+  });
+  const saveLabel = el("label", "toggle save-first");
+  const save = el("input");
+  save.type = "checkbox";
+  save.checked = true;
+  saveLabel.append(save, document.createTextNode(" Save them on this computer first"));
+  extra.append(saveLabel);
+  const choice = await ask(
+    "Remove attachments from this email on the server?\n\nThe email stays, with a note naming each attachment. The original, attachments included, goes to the Trash until you empty it.",
+    [
+      { label: "Cancel", value: null },
+      { label: "Remove", value: "remove", kind: "danger" },
+    ],
+    extra,
+  );
+  const indexes = boxes.filter((b) => b.checked).map((b) => +b.value);
+  if (choice !== "remove" || !indexes.length) return;
+  const day = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  toast("Removing the attachments…", "info", null, 30);
+  try {
+    const done = await invoke("remove_attachments", { folder, uid, indexes, save: save.checked, day });
+    if (!done) return toast("Nothing was removed.", "info", null, 3);
+    const freed = `${indexes.length === 1 ? "Attachment" : `${indexes.length} attachments`} removed · ${formatSize(done.freed)} freed`;
+    if (done.saved.length) savedToast(`${freed} · saved`, done.saved[0]);
+    else toast(freed, "info", null, 6);
+    // The email is now another one on the server: it is looked up again.
+    if (readerCard?.folder === folder && readerCard.card.uid === uid) closeReader();
+    for (const key of Object.keys(state.cards)) {
+      state.cards[key] = (state.cards[key] || []).filter((c) => !((c.__folder || key) === folder && c.uid === uid));
+    }
+    renderSoon();
+    if (columnEl(folder)) loadColumn(folder);
+  } catch (e) {
+    toast("Could not remove the attachments: " + e);
+  }
 }
 
 const IS_MAC = /Mac/.test(navigator.platform || navigator.userAgent);
@@ -522,7 +589,7 @@ async function openReader(folder, card, opts = {}) {
     readerMode = msg.html ? "html" : "text";
     readerRemoteAllowed = state.loadRemoteImages;
     $("reader-toggle").hidden = !(msg.html && msg.text);
-    renderAttachments(folder, card.uid, msg.attachments || []);
+    renderAttachments(folder, card.uid, msg.attachments || [], msg.removed || []);
     renderInvite(msg.invite);
     renderReaderBody();
     ({ reply: () => replyTo(false), "reply-all": () => replyTo(true), forward }[opts.then])?.();
@@ -1264,9 +1331,11 @@ document.addEventListener("keydown", (ev) => {
 // shows its own dialog. Resolves to the chosen button's value, or null on Esc.
 let dialogResolve = null;
 
-function ask(message, buttons) {
+/// A question with buttons; `extra`, if given, goes under the text (choices to tick).
+function ask(message, buttons, extra = null) {
   if (dialogResolve) dialogResolve(null);
   $("dialog-message").textContent = message;
+  $("dialog-extra").replaceChildren(...(extra ? [extra] : []));
   const box = $("dialog-buttons");
   box.replaceChildren(
     ...buttons.map((b) => {

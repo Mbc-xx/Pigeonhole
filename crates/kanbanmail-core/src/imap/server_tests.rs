@@ -233,3 +233,67 @@ async fn the_largest_emails_come_biggest_first_from_every_folder() {
         .iter()
         .any(|l| l.ends_with("SEARCH CHARSET UTF-8 LARGER 20480")));
 }
+
+const SLIDES: &str = "From: Anna Bianchi <anna@example.com>\nTo: me@example.com\nSubject: Slides\nMessage-ID: <slides@example.com>\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"b1\"\n\n--b1\nContent-Type: text/plain\n\nHere are the slides.\n--b1\nContent-Type: application/pdf; name=\"slides.pdf\"\nContent-Disposition: attachment; filename=\"slides.pdf\"\nContent-Transfer-Encoding: base64\n\nJVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSPj4K\n--b1--\n";
+
+#[tokio::test]
+async fn an_email_without_its_attachments_takes_its_place_and_the_original_waits_in_the_trash() {
+    let mut mb = Mailbox::new(ALL, &["INBOX", "Archive", "Trash"]);
+    mb.deliver("Archive", &email("Before", "b@x", ""), &[], 1);
+    let uid = mb.deliver("Archive", SLIDES, &["\\Seen", "\\Flagged", "$Forwarded"], 5);
+    let (server, mut s) = start(mb).await;
+    let original = server.lock().unwrap().folders["Archive"].mails[1].raw.clone();
+    let (lighter, saved) = crate::message::strip_attachments(&original, &[0], "27 Nov 2026").unwrap();
+    assert!(saved > 0);
+    replace_message(&mut s, caps(true, true), "Archive", uid, &lighter)
+        .await
+        .unwrap();
+
+    let mb = server.lock().unwrap();
+    let archive = &mb.folders["Archive"].mails;
+    assert_eq!(archive.len(), 2, "same number of emails");
+    let new = archive.last().unwrap();
+    assert_eq!(new.raw, lighter);
+    assert_eq!(
+        new.flags,
+        ["$Forwarded", "\\Flagged", "\\Seen"].map(String::from).into()
+    );
+    assert_eq!(new.internal, "05-Nov-2026 10:00:00 +0000", "the date stays");
+    // The original, attachment included, can be taken back from the Trash.
+    assert_eq!(mb.folders["Trash"].mails.len(), 1);
+    assert_eq!(mb.folders["Trash"].mails[0].raw, original);
+    // Added before anything is removed.
+    let append = mb.log.iter().position(|l| l.starts_with("APPEND")).unwrap();
+    let mv = mb.log.iter().position(|l| l.starts_with("UID MOVE")).unwrap();
+    assert!(append < mv);
+}
+
+#[tokio::test]
+async fn when_the_new_copy_cannot_be_saved_the_original_stays() {
+    // The folder disappears: APPEND fails.
+    let mut mb = Mailbox::new(ALL, &["INBOX", "Trash"]);
+    let uid = mb.deliver("INBOX", SLIDES, &[], 5);
+    let (server, mut s) = start(mb).await;
+    let err = replace_message(&mut s, caps(true, true), "Gone", uid, b"x").await;
+    assert!(err.is_err());
+    let mb = server.lock().unwrap();
+    assert_eq!(mb.folders["INBOX"].mails.len(), 1);
+    assert!(mb.folders["Trash"].mails.is_empty());
+    assert_eq!(mb.count("APPEND") + mb.count("UID MOVE"), 0);
+}
+
+#[tokio::test]
+async fn in_the_trash_the_old_copy_is_simply_deleted() {
+    let mut mb = Mailbox::new(ALL, &["INBOX", "Trash"]);
+    let uid = mb.deliver("Trash", SLIDES, &["\\Seen"], 5);
+    let (server, mut s) = start(mb).await;
+    let original = server.lock().unwrap().folders["Trash"].mails[0].raw.clone();
+    let (lighter, _) = crate::message::strip_attachments(&original, &[0], "27 Nov 2026").unwrap();
+    replace_message(&mut s, caps(true, true), "Trash", uid, &lighter)
+        .await
+        .unwrap();
+    let mb = server.lock().unwrap();
+    let trash = &mb.folders["Trash"].mails;
+    assert_eq!(trash.len(), 1);
+    assert_eq!(trash[0].raw, lighter);
+}
