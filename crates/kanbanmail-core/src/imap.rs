@@ -224,6 +224,40 @@ pub async fn server_caps(session: &mut Session) -> Result<ServerCaps> {
     })
 }
 
+/// The space the emails take on the server and the most it allows, in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct Space {
+    pub used: u64,
+    pub limit: u64,
+}
+
+/// The space used by the mailbox (IMAP QUOTA, RFC 2087), or None when the
+/// server does not say or sets no limit.
+pub async fn space(session: &mut Session) -> Result<Option<Space>> {
+    use async_imap::types::QuotaResourceName;
+    if !session
+        .capabilities()
+        .await
+        .context("CAPABILITY command failed")?
+        .has_str("QUOTA")
+    {
+        return Ok(None);
+    }
+    let (_, quotas) = session
+        .get_quota_root("INBOX")
+        .await
+        .context("cannot read the space used")?;
+    // STORAGE is counted in units of 1024 bytes.
+    Ok(quotas
+        .iter()
+        .flat_map(|q| &q.resources)
+        .find(|r| r.name == QuotaResourceName::Storage && r.limit > 0)
+        .map(|r| Space {
+            used: r.usage * 1024,
+            limit: r.limit * 1024,
+        }))
+}
+
 /// Finds the real server folder for each requested name, creating missing
 /// ones. Example: on SiteGround "Todo" becomes "INBOX.Todo".
 pub async fn resolve_folders(session: &mut Session, wanted: &[String]) -> Result<Vec<String>> {
@@ -929,7 +963,7 @@ async fn search_folders(
         for chunk in newest.chunks(200) {
             let set = chunk.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
             let fetched: Vec<_> = session
-                .uid_fetch(&set, "(UID FLAGS INTERNALDATE BODY.PEEK[]<0.32768>)")
+                .uid_fetch(&set, "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[]<0.32768>)")
                 .await
                 .with_context(|| format!("reading results in {folder} failed"))?
                 .try_collect()
@@ -939,7 +973,8 @@ async fn search_folders(
                 let date = f.internal_date().map(|d| d.timestamp()).unwrap_or(0);
                 let flagged = f.flags().any(|x| matches!(x, Flag::Flagged));
                 let seen = f.flags().any(|x| matches!(x, Flag::Seen));
-                let card = crate::message::parse_card(uid, f.body().unwrap_or_default(), flagged, seen, date);
+                let mut card = crate::message::parse_card(uid, f.body().unwrap_or_default(), flagged, seen, date);
+                card.size = f.size.unwrap_or(0);
                 // The same email can sit in several folders (e.g. Inbox and Archive).
                 let key = card
                     .message_id
@@ -1021,6 +1056,8 @@ pub struct SearchQuery {
     pub subject: Vec<String>,
     pub since: Option<String>,
     pub before: Option<String>,
+    /// Only emails bigger than this many bytes; the results come biggest first.
+    pub larger: Option<u32>,
 }
 
 impl SearchQuery {
@@ -1081,6 +1118,7 @@ fn search_criteria(q: &SearchQuery, in_body: bool) -> Option<String> {
     keys.extend(q.subject.iter().map(|v| format!("SUBJECT {}", imap_quote(v))));
     keys.extend(q.since.as_deref().and_then(imap_date).map(|d| format!("SINCE {d}")));
     keys.extend(q.before.as_deref().and_then(imap_date).map(|d| format!("BEFORE {d}")));
+    keys.extend(q.larger.map(|n| format!("LARGER {n}")));
     (!keys.is_empty()).then(|| format!("CHARSET UTF-8 {}", keys.join(" ")))
 }
 
@@ -1096,7 +1134,11 @@ pub async fn search(
 ) -> Result<Vec<ThreadEntry>> {
     let criteria = search_criteria(query, in_body).context("empty search")?;
     let mut out = search_folders(session, folders, &criteria, None, limit).await?;
-    out.sort_by_key(|a| std::cmp::Reverse(a.card.date));
+    if query.larger.is_some() {
+        out.sort_by_key(|a| std::cmp::Reverse(a.card.size));
+    } else {
+        out.sort_by_key(|a| std::cmp::Reverse(a.card.date));
+    }
     Ok(out)
 }
 
@@ -1455,6 +1497,11 @@ mod tests {
             r#"CHARSET UTF-8 (OR FROM "plan" OR TO "plan" OR CC "plan" SUBJECT "plan") FROM "Rachel Green" (OR TO "tom" CC "tom") SINCE 1-Oct-2026 BEFORE 1-Nov-2026"#
         );
         assert!(search_criteria(&SearchQuery::default(), true).is_none());
+        let big = SearchQuery {
+            larger: Some(5_242_880),
+            ..Default::default()
+        };
+        assert_eq!(search_criteria(&big, false).unwrap(), "CHARSET UTF-8 LARGER 5242880");
         assert_eq!(imap_date("2026-13-01"), None);
     }
 }

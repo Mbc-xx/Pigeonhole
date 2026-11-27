@@ -391,6 +391,10 @@ span.draft-tag { cursor: default; }
 :root[data-theme="dark"] .wait-tag.overdue, :root[data-theme="ocean"] .wait-tag.overdue, :root[data-theme="forest"] .wait-tag.overdue, :root[data-theme="midnight"] .wait-tag.overdue, :root[data-custom-mode="dark"] .wait-tag.overdue { color: #f87171; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) .wait-tag.overdue { color: #f87171; } }
 .wait-tag.late { font-weight: 600; }
+.wait-tag.size { font-variant-numeric: tabular-nums; }
+.space-bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--muted, #8a8f98) 25%, transparent); overflow: hidden; margin: 2px 0 8px; max-width: 360px; }
+.space-bar > span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 3px; }
+.space-bar.full > span { background: #dc2626; }
 .late-count { font-size: 11px; font-weight: 600; color: var(--pin); margin-left: 6px; }
 .late-count[hidden] { display: none; }
 .wait-tag.late { background: color-mix(in srgb, var(--pin) 18%, transparent); color: var(--pin); }

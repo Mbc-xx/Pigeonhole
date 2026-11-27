@@ -29,6 +29,9 @@ pub struct Card {
     /// Only the To addresses, comma-separated.
     #[serde(default)]
     pub to_only: String,
+    /// Size on the server in bytes, attachments included; 0 when not asked for.
+    #[serde(default)]
+    pub size: u32,
 }
 
 /// An attachment that can be downloaded from the reader.
@@ -228,6 +231,7 @@ pub fn parse_card(uid: u32, raw: &[u8], flagged: bool, seen: bool, fallback_date
         thread_refs,
         to,
         to_only,
+        size: 0,
     }
 }
 

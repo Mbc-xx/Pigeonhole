@@ -773,6 +773,21 @@ function folderLabel(folder) {
 
 function searchOptions() {
   const box = el("div", "search-opts");
+  if (state.view.largest) {
+    const label = el("label", "", "Bigger than ");
+    const pick = el("select");
+    for (const mb of LARGEST_CHOICES) pick.append(new Option(`${mb} MB`, String(mb)));
+    pick.value = String(largestMb());
+    pick.addEventListener("change", () => {
+      local.set("largest", pick.value);
+      openLargest();
+    });
+    label.append(pick);
+    const status = el("span", "muted");
+    status.id = "search-status";
+    box.append(label, status);
+    return box;
+  }
   const label = el("label", "toggle");
   const cb = el("input");
   cb.type = "checkbox";
@@ -786,6 +801,21 @@ function searchOptions() {
   status.id = "search-status";
   box.append(label, status);
   return box;
+}
+
+const LARGEST_CHOICES = [1, 5, 10, 25];
+const largestMb = () => (LARGEST_CHOICES.includes(+local.get("largest")) ? +local.get("largest") : 5);
+
+/// The emails that take the most space, from every folder of the server,
+/// biggest first: what to clean up when the mailbox is nearly full.
+function openLargest() {
+  $("search").value = "";
+  state.filter = null;
+  state.view = { folder: SEARCH_KEY, label: "Largest emails", search: `larger:${largestMb()}mb`, from: ALL_KEY, multi: true, largest: true };
+  state.cards[SEARCH_KEY] = [];
+  renderColumns();
+  renderFolders();
+  runSearch();
 }
 
 /// Server search in two steps: first Inbox, Sent, Archive, the board columns and
@@ -808,6 +838,13 @@ async function runSearch() {
   const folders = state.columns.map((c) => c.folder);
   if (view.from && !MULTI_KEYS.includes(view.from) && !folders.includes(view.from)) folders.push(view.from);
   const query = parseQuery(view.search);
+  // Sizes are known only to the server, and the biggest may be anywhere:
+  // every folder is searched, with all it finds.
+  if (query.larger) {
+    view.bySize = view.searchDone = true;
+    state.cards[SEARCH_KEY] = [];
+    return searchWholeServer();
+  }
   const args = { query, inBody: !!view.inBody, folders };
   // Results found on this Mac come first (instant, also offline); the server
   // results are merged in as they arrive and win for the same email.
@@ -889,13 +926,13 @@ async function searchWholeServer() {
   for (const [i, folder] of folders.entries()) {
     setStatus(`${found.size} found · searching ${folderLabel(folder)} (${i + 1} of ${folders.length})…`);
     try {
-      const entries = await invoke("search_emails", { query, inBody: true, folders: [folder], scope: "full" });
+      const entries = await invoke("search_emails", { query, inBody: !query.larger, folders: [folder], scope: "full" });
       if (!alive()) return;
       for (const e of entries) {
         const key = searchKey(e.card, e.folder);
         if (!isAllFolder(e.folder) || !found.has(key)) found.set(key, { ...e.card, __folder: e.folder });
       }
-      state.cards[SEARCH_KEY] = [...found.values()].sort((a, b) => b.date - a.date);
+      state.cards[SEARCH_KEY] = [...found.values()].sort(view.bySize ? (a, b) => b.size - a.size : (a, b) => b.date - a.date);
       renderCards(SEARCH_KEY);
     } catch (e) {
       if (!alive()) return;

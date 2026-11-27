@@ -2197,6 +2197,13 @@ async fn list_folders(state: State<'_, AppState>) -> CmdResult<Vec<imap::FolderI
     read_retry!(inner, |s, _caps| imap::folder_tree(s))
 }
 
+/// The space the emails take on the server and the most allowed, when it says.
+#[tauri::command]
+async fn server_space(state: State<'_, AppState>) -> CmdResult<Option<imap::Space>> {
+    let mut inner = state.inner.lock().await;
+    read_retry!(inner, |s, _caps| imap::space(s))
+}
+
 /// Unread emails of the given folders. The connection is let go after each one:
 /// counting can be slow, and a click must not wait for all of it.
 #[tauri::command]
@@ -2728,6 +2735,7 @@ fn main() {
             send_mail,
             list_folders,
             folder_unseen,
+            server_space,
             new_message_id,
             save_draft,
             discard_draft,

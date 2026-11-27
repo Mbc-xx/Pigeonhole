@@ -43,6 +43,8 @@ pub struct Mailbox {
     pub folders: BTreeMap<String, Folder>,
     /// Every command received, without its tag.
     pub log: Vec<String>,
+    /// Storage used and allowed, in units of 1024 bytes (with the QUOTA capability).
+    pub quota: (u64, u64),
 }
 
 impl Mailbox {
@@ -64,6 +66,7 @@ impl Mailbox {
             caps: caps.to_vec(),
             folders,
             log: Vec::new(),
+            quota: (0, 0),
         }
     }
 
@@ -248,6 +251,9 @@ fn fetch_line(seq: usize, mail: &Mail, items: &str) -> Vec<u8> {
     if items.contains("INTERNALDATE") {
         out.extend(format!(" INTERNALDATE \"{}\"", mail.internal).bytes());
     }
+    if items.contains("RFC822.SIZE") {
+        out.extend(format!(" RFC822.SIZE {}", mail.raw.len()).bytes());
+    }
     if items.contains("BODY.PEEK[]") || items.contains("BODY[]") {
         let len = if items.contains("<0.") {
             mail.raw.len().min(32768)
@@ -273,6 +279,12 @@ fn answer(mailbox: &mut Mailbox, selected: &mut Option<String>, tag: &str, comma
             out.extend(ok("done"));
         }
         Some("LOGIN") | Some("NOOP") => out.extend(ok("done")),
+        Some("GETQUOTAROOT") => {
+            let (used, limit) = mailbox.quota;
+            out.extend(format!("* QUOTAROOT {} \"\"\r\n", args[1]).bytes());
+            out.extend(format!("* QUOTA \"\" (STORAGE {used} {limit})\r\n").bytes());
+            out.extend(ok("done"));
+        }
         Some("LOGOUT") => {
             out.extend(b"* BYE\r\n");
             out.extend(ok("bye"));
@@ -384,6 +396,18 @@ fn answer(mailbox: &mut Mailbox, selected: &mut Option<String>, tag: &str, comma
                     out.extend(expunge(mailbox.folders.get_mut(&name).unwrap(), |m| {
                         uids.contains(&m.uid) && m.flags.contains("\\Deleted")
                     }));
+                }
+                "SEARCH" if upper.contains(&"LARGER".to_string()) => {
+                    // LARGER n (alone, after CHARSET UTF-8).
+                    let at = upper.iter().position(|a| a == "LARGER").unwrap();
+                    let n: usize = args[at + 1].parse().unwrap();
+                    let found: Vec<String> = mailbox.folders[&name]
+                        .mails
+                        .iter()
+                        .filter(|m| m.raw.len() > n)
+                        .map(|m| m.uid.to_string())
+                        .collect();
+                    out.extend(format!("* SEARCH {}\r\n", found.join(" ")).replace(" \r", "\r").bytes());
                 }
                 "SEARCH" => {
                     // Only HEADER Message-ID "<id>" is understood.
