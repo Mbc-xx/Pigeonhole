@@ -1307,3 +1307,29 @@ body.resizing { cursor: col-resize; user-select: none; }
 .link-btn { padding: 0; border: none; background: none; color: var(--accent-ink); font: inherit; cursor: pointer; }
 .link-btn:hover { background: none; text-decoration: underline; }
 .settings-buttons label.toggle { display: flex; align-items: center; gap: 6px; }
+/* Next step: one line of my own on an email, under its preview. */
+.next-step {
+  display: flex; align-items: center; gap: 5px; width: 100%; max-width: 100%; box-sizing: border-box;
+  margin-top: 5px; padding: 2px 7px; border: 0; border-left: 2px solid var(--accent); border-radius: 0 var(--r-s) var(--r-s) 0;
+  background: var(--accent-soft); color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.next-step:hover { filter: brightness(0.96); }
+.next-step .icon { width: 12px; height: 12px; flex-shrink: 0; color: var(--accent-ink); }
+.next-step span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cards.rows .next-step { display: inline-flex; width: auto; margin: 0 0 0 8px; padding: 0 6px; vertical-align: 1px; font-size: 11px; max-width: 45%; }
+.reader-step { display: flex; margin: 2px 0 8px; }
+.reader-step:empty { display: none; }
+.reader-step .next-step { width: auto; font-size: 13px; padding: 4px 10px; }
+.add-step {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9px;
+  border: var(--hairline) dashed var(--edge); background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+}
+.add-step:hover { color: var(--text); border-color: var(--accent); }
+.add-step .icon { width: 11px; height: 11px; }
+/* To do in my order: a card not placed yet, and where a dragged card lands. */
+.wait-tag.unplaced { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.card.drop-before::before, .card.drop-after::after {
+  content: ""; position: absolute; left: 4px; right: 4px; height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none;
+}
+.card.drop-before::before { top: -6px; }
+.card.drop-after::after { bottom: -6px; }

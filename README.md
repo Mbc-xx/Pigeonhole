@@ -59,6 +59,13 @@ variables come from there.
   chose (5 days by default), in red after twice as long, and the column title
   counts the late ones. A conversation counts from its newest email written by
   someone else.
+- **Your order.** Drag cards up and down in the Todo column and they stay
+  there (pinned ones stay on top). An email that arrives later waits on top as
+  "New here" until you place it; the right-click menu moves a card to the top or
+  the bottom, or goes back to newest first.
+- **Next step.** One line of your own on an email ("call Anna first"), shown on
+  its card and in the reader, for the whole conversation. Right-click → Next
+  step…, or the button in the reader.
 - **Done.** Optionally, finished emails leave the Done column after some days, to
   Archive or to a folder of yours such as "Done archive". Pinned and unread
   emails stay; Undo is offered.
@@ -248,9 +255,10 @@ From the settings button, grouped in tabs:
 They are stored as TOML files in the configuration folder
 (`~/Library/Application Support/Pigeonhole` on macOS), one folder per account.
 Nothing is synced to the cloud, and removing the app leaves these files in place.
-"Export settings…" saves columns, signatures, rules, folders, tasks and settings
-(never a password) to a JSON file; "Import settings…" applies it on another
-computer.
+"Export settings…" saves columns, signatures, rules, folders, tasks, next steps,
+the Todo order, snoozed emails and settings (never a password) to a JSON file;
+"Import settings…" applies it on another computer, Mac or Windows (tasks, next
+steps and snoozed emails only for the same email address).
 
 ## Copy on this computer
 
