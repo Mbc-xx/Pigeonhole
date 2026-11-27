@@ -2819,6 +2819,21 @@ mod tests {
     }
 
     #[test]
+    fn links_clicked_in_an_email_reach_the_app() {
+        // WebKit checks frame-src before on_navigation: without web addresses
+        // there, a click on a link in an email silently does nothing.
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let csp = conf["app"]["security"]["csp"].as_str().unwrap();
+        let frame = csp
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with("frame-src"))
+            .unwrap();
+        let sources: Vec<&str> = frame.split_whitespace().collect();
+        assert!(sources.contains(&"https:") && sources.contains(&"http:"), "{frame}");
+    }
+
+    #[test]
     fn programs_and_scripts_are_never_opened_from_an_email() {
         for name in [
             "setup.exe",
