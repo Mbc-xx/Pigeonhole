@@ -581,7 +581,8 @@ function taskTags(members, all = false) {
 }
 
 function renderReaderTasks() {
-  const tags = readerCard ? taskTags([readerCard], true) : [];
+  const step = readerCard && readerCard.folder !== FILE_FOLDER ? stepTag([readerCard]) : null;
+  const tags = readerCard ? [step, ...taskTags([readerCard], true)].filter(Boolean) : [];
   $("reader-tasks").replaceChildren(...tags);
   $("reader-tasks").hidden = !tags.length;
 }
