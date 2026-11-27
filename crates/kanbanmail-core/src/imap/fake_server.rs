@@ -5,7 +5,7 @@
 use super::Session;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore, ServerConfig};
@@ -172,11 +172,36 @@ pub async fn start(mailbox: Mailbox) -> (Shared, Session) {
 
 async fn serve<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(stream: S, state: Shared) {
     let (read, mut write) = tokio::io::split(stream);
-    let mut lines = BufReader::new(read).lines();
+    let mut reader = BufReader::new(read);
     write.write_all(b"* OK fake IMAP ready\r\n").await.unwrap();
     let mut selected: Option<String> = None;
-    while let Ok(Some(line)) = lines.next_line().await {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+            break;
+        }
+        let line = line.trim_end_matches(['\r', '\n']).to_string();
         let (tag, command) = line.split_once(' ').unwrap_or((line.as_str(), ""));
+        // APPEND ... {n}: the email follows as n bytes, after a go-ahead.
+        if let Some(len) = command
+            .strip_suffix('}')
+            .and_then(|c| c.rsplit_once('{'))
+            .and_then(|(_, n)| n.parse::<usize>().ok())
+        {
+            write.write_all(b"+ go ahead\r\n").await.unwrap();
+            let mut raw = vec![0; len];
+            reader.read_exact(&mut raw).await.unwrap();
+            let mut end = String::new();
+            reader.read_line(&mut end).await.unwrap();
+            let out = {
+                let mut mailbox = state.lock().unwrap();
+                mailbox.log.push(command.to_string());
+                append(&mut mailbox, tag, command, raw)
+            };
+            write.write_all(&out).await.unwrap();
+            continue;
+        }
         let out = {
             let mut mailbox = state.lock().unwrap();
             mailbox.log.push(command.to_string());
@@ -428,6 +453,35 @@ fn answer(mailbox: &mut Mailbox, selected: &mut Option<String>, tag: &str, comma
         _ => return format!("{tag} BAD unknown command\r\n").into_bytes(),
     }
     out
+}
+
+/// APPEND "folder" (flags) "date" {n}: adds the email that came after it.
+fn append(mailbox: &mut Mailbox, tag: &str, command: &str, raw: Vec<u8>) -> Vec<u8> {
+    let args = words(command.rsplit_once('{').unwrap().0);
+    let Some(folder) = mailbox.folders.get_mut(&args[1]) else {
+        return format!("{tag} NO [TRYCREATE] no such folder\r\n").into_bytes();
+    };
+    let flags = args
+        .iter()
+        .find(|a| a.starts_with('('))
+        .map(|f| {
+            f.trim_matches(|c| c == '(' || c == ')')
+                .split_whitespace()
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let internal = args
+        .get(3)
+        .cloned()
+        .unwrap_or_else(|| "01-Nov-2026 10:00:00 +0000".into());
+    let uid = folder.add(Mail {
+        uid: 0,
+        flags,
+        raw,
+        internal,
+    });
+    format!("{tag} OK [APPENDUID 1 {uid}] done\r\n").into_bytes()
 }
 
 /// Removes the emails `gone` picks and reports them, highest number first so

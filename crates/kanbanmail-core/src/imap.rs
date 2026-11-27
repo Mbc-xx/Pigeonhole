@@ -648,6 +648,57 @@ pub async fn has_message(session: &mut Session, folder: &str, message_id: &str) 
     Ok(!uids_by_message_id(session, message_id).await?.is_empty())
 }
 
+/// Puts `raw` in the place of the email `uid` of `folder`, with its flags and
+/// its date. An IMAP server cannot change an email: the new copy is added
+/// first, and only once it is there does the old one go to the Trash, where it
+/// can still be taken back (when the email is already in the Trash, it is
+/// deleted). If anything fails on the way, the old email stays where it was.
+pub async fn replace_message(
+    session: &mut Session,
+    caps: ServerCaps,
+    folder: &str,
+    uid: u32,
+    raw: &[u8],
+) -> Result<()> {
+    use async_imap::types::Flag;
+    let trash = trash_folder(session).await?;
+    session.open(folder).await?;
+    let fetched: Vec<_> = session
+        .uid_fetch(uid.to_string(), "(UID FLAGS INTERNALDATE)")
+        .await
+        .with_context(|| format!("reading the email in {folder} failed"))?
+        .try_collect()
+        .await?;
+    let old = fetched
+        .iter()
+        .find(|f| f.uid == Some(uid))
+        .context("the email is no longer there")?;
+    let flags: Vec<String> = old
+        .flags()
+        .filter_map(|f| match f {
+            Flag::Seen => Some("\\Seen".into()),
+            Flag::Answered => Some("\\Answered".into()),
+            Flag::Flagged => Some("\\Flagged".into()),
+            Flag::Draft => Some("\\Draft".into()),
+            Flag::Custom(k) if !k.starts_with('\\') => Some(k.to_string()),
+            _ => None,
+        })
+        .collect();
+    let date = old
+        .internal_date()
+        .map(|d| format!("\"{}\"", d.format("%d-%b-%Y %H:%M:%S %z")));
+    session
+        .append(folder, Some(&format!("({})", flags.join(" "))), date.as_deref(), raw)
+        .await
+        .with_context(|| format!("saving the new copy to {folder} failed"))?;
+    if folder == trash {
+        session.open(folder).await?;
+        delete_uids(session, caps, &[uid]).await
+    } else {
+        move_messages(session, caps, folder, &[uid], &trash).await
+    }
+}
+
 /// Saves a copy of a sent email to the given folder, already marked as read.
 pub async fn append_sent(session: &mut Session, folder: &str, raw: &[u8]) -> Result<()> {
     session

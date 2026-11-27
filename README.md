@@ -99,6 +99,12 @@ variables come from there.
 - **Attachments**: preview them without saving (Quick Look on macOS), save them
   to the folder you choose and show them in Finder, or drag them straight to a
   folder, the desktop or another app.
+- **Remove attachments** to free space on the server: choose which ones, save
+  them on this computer first (on by default), and the email keeps a note with
+  their names in their place. A server cannot change an email, so the lighter
+  copy is saved first and only then the original, attachments included, goes to
+  the Trash, where it waits until you empty it. Signed or encrypted emails are
+  left alone.
 - **Calendar invitations** show date, time, place and organizer, with Accept /
   Maybe / Decline or "Add to Calendar".
 - **Unsubscribe** from newsletters that allow it, with one click when the list

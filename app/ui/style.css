@@ -1334,3 +1334,14 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .card.drop-before::before { top: -6px; }
 .card.drop-after::after { bottom: -6px; }
+
+/* Attachments taken out to free space, and the button that does it. */
+.attachment.removed { opacity: 0.6; cursor: default; display: inline-flex; align-items: center; gap: 6px; }
+.attachment.removed .att-name { text-decoration: line-through; }
+.att-remove { display: inline-flex; align-items: center; gap: 4px; background: none; border: 1px dashed var(--border, #d0d4da); color: var(--muted); border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; }
+.att-remove:hover { color: var(--text); border-style: solid; }
+.att-remove .icon { width: 13px; height: 13px; }
+.remove-atts { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 12px; max-height: 240px; overflow: auto; text-align: left; }
+.remove-atts label.toggle { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; font-weight: normal; overflow-wrap: anywhere; }
+.remove-atts label.toggle input { flex: none; width: auto; margin: 0; }
+.remove-atts .save-first { margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border, #d0d4da); }

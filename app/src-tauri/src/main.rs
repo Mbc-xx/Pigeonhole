@@ -1910,6 +1910,110 @@ async fn save_attachment(
     Ok(saved)
 }
 
+/// What removing attachments did: where they were saved, and the space freed.
+#[derive(serde::Serialize)]
+struct AttachmentsRemoved {
+    saved: Vec<String>,
+    freed: usize,
+}
+
+/// Where to save several attachments at once: the folder chosen in the
+/// settings, or one asked for now (None when that question is cancelled).
+async fn save_dir(window: &tauri::Window) -> CmdResult<Option<std::path::PathBuf>> {
+    let chosen = Settings::load().map_err(err)?.save_folder;
+    if chosen == "ask" {
+        let picked = rfd::AsyncFileDialog::new()
+            .set_title("Save the attachments in")
+            .set_parent(window)
+            .pick_folder()
+            .await;
+        return Ok(picked.map(|f| f.path().to_path_buf()));
+    }
+    if chosen == "downloads" {
+        let dirs = directories::UserDirs::new();
+        let dir = dirs
+            .as_ref()
+            .and_then(|d| d.download_dir())
+            .ok_or("cannot find the Downloads folder")?;
+        return Ok(Some(dir.to_path_buf()));
+    }
+    let dir = std::path::PathBuf::from(&chosen);
+    if !dir.is_dir() {
+        return Err(format!(
+            "the folder {chosen} is not there: choose another one in Settings → Storage"
+        ));
+    }
+    Ok(Some(dir))
+}
+
+/// Takes attachments out of an email on the server to free space, after
+/// saving them on this computer when `save` is on. The email is read again
+/// from the server, so nothing is lost from an incomplete local copy; the
+/// original goes to the Trash (see imap::replace_message). Nothing changes on
+/// the server until every file is saved. None when the user cancelled.
+#[tauri::command]
+async fn remove_attachments(
+    folder: String,
+    uid: u32,
+    indexes: Vec<usize>,
+    save: bool,
+    day: String,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+) -> CmdResult<Option<AttachmentsRemoved>> {
+    if folder == FILE_FOLDER || indexes.is_empty() {
+        return Err("nothing to remove".into());
+    }
+    let raw = {
+        let mut inner = state.inner.lock().await;
+        read_retry!(inner, |s, _caps| imap::load_raw(s, &folder, uid))?
+    };
+    let day: String = day
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .take(40)
+        .collect();
+    let (lighter, freed) = kanbanmail_core::message::strip_attachments(&raw, &indexes, day.trim())?;
+    let mut saved = Vec::new();
+    if save {
+        let Some(dir) = save_dir(&window).await? else {
+            return Ok(None);
+        };
+        for &index in &indexes {
+            let (name, bytes) = kanbanmail_core::message::attachment(&raw, index).ok_or("attachment not found")?;
+            let path = unique_path(&dir, &safe_file_name(&name));
+            std::fs::write(&path, &bytes).map_err(|e| format!("cannot save {}: {e}", path.display()))?;
+            mark_downloaded(&path);
+            saved.push(path.display().to_string());
+        }
+    }
+    // One attempt only: trying again after the new copy was saved would add it twice.
+    let mut inner = state.inner.lock().await;
+    let outcome = tokio::time::timeout(OPERATION_TIMEOUT, async {
+        inner.ensure_session().await?;
+        let caps = inner.caps;
+        let s = inner.session.as_mut().unwrap();
+        imap::replace_message(s, caps, &folder, uid, &lighter).await
+    })
+    .await;
+    match outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            inner.session = None;
+            return Err(err(e));
+        }
+        Err(_) => {
+            inner.session = None;
+            return Err(
+                "the server did not answer in time: look in the folder and in the Trash before trying again".into(),
+            );
+        }
+    }
+    drop(inner);
+    state.with_store(|st| st.remove(&folder, &[uid]));
+    Ok(Some(AttachmentsRemoved { saved, freed }))
+}
+
 /// Marks a file that came with an email as downloaded, as Mail, Outlook and
 /// browsers do: the system then warns before opening a program or a script
 /// from it (Gatekeeper on macOS, SmartScreen and Office's Protected View on
@@ -2740,6 +2844,7 @@ fn main() {
             save_draft,
             discard_draft,
             save_attachment,
+            remove_attachments,
             pick_save_folder,
             reveal_file,
             prepare_attachment,
