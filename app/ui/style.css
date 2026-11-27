@@ -683,7 +683,9 @@ button:disabled { opacity: 0.6; cursor: default; }
 :root[data-compact-actions="true"] .reader-actions button { padding: 5px 7px; }
 :root[data-compact-actions="true"] .reader-actions button > span { display: none; }
 
-.composer { position: relative; width: min(920px, 100%); }
+/* A steady height: the plain text field does not grow with its text as the
+   visual editor does, and a window sized by its content shrank with it. */
+.composer { position: relative; width: min(920px, 100%); height: min(780px, 100%); }
 .compose-fields { display: flex; flex-direction: column; gap: 6px; padding: 4px 16px 10px; }
 .compose-fields label, .compose-fields .field-row { display: grid; grid-template-columns: 70px minmax(0, 1fr); align-items: center; color: var(--muted); }
 /* Recipients as chips: click to select (then copy), double-click to edit, drag between To / Cc / Bcc. */

@@ -709,8 +709,7 @@ for (const b of document.querySelectorAll(".sig-toolbar [data-cmd]")) {
 $("sig-clear").addEventListener("mousedown", (ev) => ev.preventDefault());
 $("sig-clear").addEventListener("click", () => {
   restoreSelection();
-  document.execCommand("removeFormat");
-  document.execCommand("unlink");
+  clearFormatting(sigEditor) || toast("Select the text to take its formatting off.", "info");
 });
 
 const closeSigLink = linkTool("sig-link", sigEditor, rememberSelection, restoreSelection);

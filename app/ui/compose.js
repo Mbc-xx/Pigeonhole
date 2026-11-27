@@ -82,6 +82,7 @@ async function openComposer({ to = "", cc = "", bcc = state.defaultBcc, subject 
   compose.attachments = attachments;
   compose.from = senderNamed(from)?.email || "";
   compose.quote = quote;
+  compose.richSaved = null;
   // A draft opens in the editor it was written in; a new email in the usual one.
   const fmt = format || local.get("composeFormat");
   compose.markdown = fmt === "markdown";
@@ -368,15 +369,31 @@ function renderFormat() {
 }
 
 /// Switches between "plain", "markdown" and "rich", converting what was written.
+/// Leaving the visual editor keeps its formatting aside: going back with the
+/// text unchanged gives it back exactly. To Markdown the formatting is written
+/// as Markdown, so it also comes back after changes.
 async function setFormat(fmt) {
   const was = compose.rich ? "rich" : compose.markdown ? "markdown" : "plain";
   if (fmt === was) return;
   if (fmt === "rich") {
     const text = $("compose-body").value;
+    const saved = compose.richSaved;
     $("compose-rich").innerHTML =
-      was === "markdown" ? await invoke("render_markdown", { text }).catch(() => textToRichHtml(text)) : richFromText(text);
+      saved && saved.text === text
+        ? saved.html
+        : was === "markdown"
+          ? await invoke("render_markdown", { text }).catch(() => textToRichHtml(text))
+          : richFromText(text);
+    compose.richSaved = null;
   } else if (was === "rich") {
-    $("compose-body").value = richText();
+    const text = fmt === "markdown" ? richMarkdown() : richText();
+    compose.richSaved = { html: $("compose-rich").innerHTML, text };
+    $("compose-body").value = text;
+  } else if (compose.richSaved?.text === $("compose-body").value) {
+    // Plain <-> Markdown without changes: the visual version still applies.
+    const text = fmt === "markdown" ? mdFromHtml(compose.richSaved.html) : plainFromHtml(compose.richSaved.html);
+    compose.richSaved.text = text;
+    $("compose-body").value = text;
   }
   compose.markdown = fmt === "markdown";
   compose.rich = fmt === "rich";
@@ -417,6 +434,128 @@ function richText() {
   return text;
 }
 
+/// The visual editor as Markdown: bold, italic, links, lists, headings and
+/// quotes are kept, the rest becomes plain text. A single line break stays a
+/// line break (see markdown_to_html).
+function richMarkdown() {
+  return mdFromHtml($("compose-rich").innerHTML);
+}
+
+function mdFromHtml(html) {
+  const root = document.createElement("div");
+  root.innerHTML = html;
+  const md = mdBlocks(root).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "");
+  return md.replace(/^--$/m, "-- "); // the signature line keeps its space
+}
+
+/// The text of HTML, as the visual editor would give it (for a format change
+/// between Plain and Markdown made without touching the text).
+function plainFromHtml(html) {
+  const ed = $("compose-rich");
+  const keep = ed.innerHTML;
+  ed.innerHTML = html;
+  const text = richText();
+  ed.innerHTML = keep;
+  return text;
+}
+
+const MD_BLOCK = /^(P|DIV|UL|OL|LI|H[1-6]|BLOCKQUOTE|PRE|TABLE|THEAD|TBODY|TR|HR|SECTION|ARTICLE|HEADER|FOOTER)$/;
+
+/// Markers around text, outside its spaces ("** bold **" is not bold).
+function mdWrap(mark, text) {
+  const [, lead, body, tail] = text.match(/^(\s*)([\s\S]*?)(\s*)$/);
+  return body ? lead + mark + body + mark + tail : text;
+}
+
+function mdInline(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue.replace(/\u00a0/g, " ").replace(/\s*\n\s*/g, " ");
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const tag = node.tagName;
+  if (tag === "BR") return "\n";
+  if (tag === "IMG") return node.alt || "";
+  const inner = [...node.childNodes].map(mdInline).join("");
+  const weight = node.style?.fontWeight;
+  if (tag === "B" || tag === "STRONG" || weight === "bold" || +weight >= 600) return mdWrap("**", inner);
+  if (tag === "I" || tag === "EM" || node.style?.fontStyle === "italic") return mdWrap("*", inner);
+  if (tag === "S" || tag === "STRIKE" || tag === "DEL") return mdWrap("~~", inner);
+  if (tag === "CODE") return mdWrap("`", inner);
+  if (tag === "U") return inner.trim() ? `<u>${inner}</u>` : inner;
+  if (tag === "A" && node.getAttribute("href") && inner.trim()) {
+    const href = node.getAttribute("href");
+    return href === inner.trim() || href === "mailto:" + inner.trim() ? inner : `[${inner}](${href})`;
+  }
+  return inner;
+}
+
+/// Block elements one per line (the editor puts each line in its own block).
+function mdBlocks(el) {
+  const lines = [];
+  let run = "";
+  const flush = () => {
+    if (run !== "") lines.push(run);
+    run = "";
+  };
+  for (const node of el.childNodes) {
+    if (node.nodeType !== Node.ELEMENT_NODE || !MD_BLOCK.test(node.tagName)) {
+      run += mdInline(node);
+      continue;
+    }
+    flush();
+    const tag = node.tagName;
+    if (tag === "UL" || tag === "OL") {
+      let n = 0;
+      for (const li of node.children) {
+        const mark = tag === "OL" ? `${++n}. ` : "- ";
+        const body = mdBlocks(li).replace(/\n+$/, "").split("\n");
+        lines.push(mark + body[0], ...body.slice(1).map((l) => " ".repeat(mark.length) + l));
+      }
+    } else if (/^H[1-6]$/.test(tag)) {
+      lines.push("#".repeat(+tag[1]) + " " + mdInline(node).trim());
+    } else if (tag === "BLOCKQUOTE") {
+      lines.push(...mdBlocks(node).replace(/\n+$/, "").split("\n").map((l) => (l ? "> " + l : ">")));
+    } else if (tag === "HR") {
+      lines.push("---");
+    } else {
+      lines.push(mdBlocks(node).replace(/\n$/, ""));
+    }
+  }
+  flush();
+  return lines.join("\n") + "\n";
+}
+
+/// Takes the formatting off the selected text only: bold, italic, underline,
+/// fonts, sizes, colors, links and headings. Lists and quotes stay, and the
+/// text around the selection keeps its own formatting.
+function clearFormatting(editor) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed || !editor.contains(sel.anchorNode)) return false;
+  // The browser splits the formatting at the edges of the selection…
+  document.execCommand("removeFormat");
+  document.execCommand("unlink");
+  // …then what it leaves inside is cleared too (styles of quoted emails,
+  // <span>s with classes, headings).
+  const range = sel.getRangeAt(0);
+  // Only elements wholly in the selection: one that goes past it is formatting of the rest too.
+  const inside = (n) => {
+    if (!range.intersectsNode(n)) return false;
+    const r = document.createRange();
+    r.selectNodeContents(n);
+    return range.compareBoundaryPoints(Range.START_TO_START, r) <= 0 && range.compareBoundaryPoints(Range.END_TO_END, r) >= 0;
+  };
+  const all = [...editor.querySelectorAll("*")].filter(inside);
+  for (const n of all.reverse()) {
+    if (n.tagName === "IMG") continue; // pictures keep their size
+    for (const a of ["style", "class", "color", "face", "size", "bgcolor", "align"]) n.removeAttribute(a);
+    if (/^(B|STRONG|I|EM|U|S|STRIKE|DEL|INS|FONT|SPAN|MARK|CODE|SUB|SUP|BIG|SMALL|A|TT)$/.test(n.tagName)) n.replaceWith(...n.childNodes);
+    else if (/^H[1-6]$/.test(n.tagName)) {
+      const div = document.createElement("div");
+      div.append(...n.childNodes);
+      n.replaceWith(div);
+    }
+  }
+  return true;
+}
+
 // Visual editor toolbar.
 let richRange = null;
 const rememberRich = () => {
@@ -437,6 +576,7 @@ for (const b of document.querySelectorAll("#rich-toolbar [data-rich]")) {
     restoreRich();
     const cmd = b.dataset.rich;
     if (cmd === "blockquote") document.execCommand("formatBlock", false, "blockquote");
+    else if (cmd === "removeFormat") clearFormatting($("compose-rich")) || toast("Select the text to take its formatting off.", "info");
     else document.execCommand(cmd);
     rememberRich();
   });
@@ -1049,6 +1189,7 @@ async function reopenPending(pending, fromDraft = true) {
   });
   compose.rich = pending.rich;
   compose.markdown = pending.markdown;
+  compose.richSaved = null;
   renderFormat();
   if (pending.rich) $("compose-rich").innerHTML = d.html || "";
   compose.initial = compose.saved = composeSnapshot();
